@@ -104,83 +104,28 @@ const DEFAULT_GIFTS = [
 let CUSTOM_GIFTS = [];
 let GIFTS = [...DEFAULT_GIFTS];
 
-/* === IndexedDB хранилище для кастомных подарков (поддерживает тяжелые GIF/WEBP/MP4) === */
-const DB_NAME = 'GiftMarketCustomDB';
-const DB_STORE = 'gifts';
-
-function openGiftsDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(DB_STORE)) {
-        db.createObjectStore(DB_STORE, { keyPath: 'id' });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function loadCustomGifts() {
+/* === Синхронизация каталога с сервером Render (видят все пользователи) === */
+async function fetchServerGifts() {
   try {
-    const db = await openGiftsDB();
-    return await new Promise((resolve) => {
-      const tx = db.transaction(DB_STORE, 'readonly');
-      const req = tx.objectStore(DB_STORE).getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => resolve([]);
-    });
+    const res = await fetch('/api/gifts', { cache: 'no-store' });
+    if (!res.ok) throw new Error('API unavailable');
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      GIFTS = data;
+      return true;
+    }
   } catch (err) {
-    return [];
+    // Fallback если открыли index.html локально без node server.js
+    const localSaved = localStorage.getItem('gmFallbackGifts');
+    if (localSaved) {
+      try { GIFTS = JSON.parse(localSaved); } catch (e) {}
+    }
   }
+  return false;
 }
 
-async function saveCustomGiftToDB(giftObj) {
-  const db = await openGiftsDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, 'readwrite');
-    tx.objectStore(DB_STORE).put(giftObj);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function deleteCustomGiftFromDB(id) {
-  const db = await openGiftsDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, 'readwrite');
-    tx.objectStore(DB_STORE).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-function rebuildGiftsList() {
-  const hiddenIds = JSON.parse(localStorage.getItem('giftMarketHiddenIds') || '[]');
-  const reservedOverrides = JSON.parse(localStorage.getItem('giftMarketReservedOverrides') || '{}');
-  const editedOverrides = JSON.parse(localStorage.getItem('giftMarketEditedOverrides') || '{}');
-  const base = DEFAULT_GIFTS
-    .filter(g => !hiddenIds.includes(g.id))
-    .map(g => {
-      const ov = editedOverrides[g.id] || {};
-      const merged = {
-        ...g,
-        ...ov,
-        prices: { ...g.prices, ...(ov.prices || {}) },
-        traits: {
-          model: { ...g.traits.model, ...(ov.traits?.model || {}) },
-          pattern: { ...g.traits.pattern, ...(ov.traits?.pattern || {}) },
-          backdrop: { ...g.traits.backdrop, ...(ov.traits?.backdrop || {}) }
-        }
-      };
-      merged.subtitle = `Коллекционный подарок · модель ${merged.model}`;
-      if (reservedOverrides[g.id] !== undefined) {
-        merged.reserved = reservedOverrides[g.id];
-      }
-      return merged;
-    });
-  GIFTS = [...base, ...CUSTOM_GIFTS];
+function getAdminPassword() {
+  return sessionStorage.getItem('gmAdminPass') || '';
 }
 
 const CURRENCIES = ['TON', 'BYN', 'STARS'];
@@ -1032,7 +977,7 @@ app.addEventListener('change', async e => {
   }
 });
 
-// Сохранение нового или отредактированного подарка
+// Сохранение нового или отредактированного подарка на сервер
 app.addEventListener('submit', async e => {
   if (e.target.id !== 'addGiftForm') return;
   e.preventDefault();
@@ -1046,23 +991,6 @@ app.addEventListener('submit', async e => {
     return;
   }
 
-  let avatarData = existingGift ? existingGift.file : '';
-  if (avatarInput.files[0]) {
-    avatarData = await readFileAsDataURL(avatarInput.files[0]);
-  }
-
-  const previewInput = $('#gfPreviewFile');
-  let previewData = existingGift ? existingGift.video : avatarData;
-  let previewIsVideo = existingGift ? existingGift.previewIsVideo : false;
-
-  if (previewInput.files[0]) {
-    previewData = await readFileAsDataURL(previewInput.files[0]);
-    previewIsVideo = previewInput.files[0].type.startsWith('video/');
-  } else if (!isEditing && avatarInput.files[0]) {
-    previewData = avatarData;
-    previewIsVideo = false;
-  }
-
   const name = $('#gfName').value.trim();
   const rawNum = $('#gfNumber').value.trim();
   const number = rawNum.startsWith('#') ? rawNum : `#${rawNum}`;
@@ -1072,107 +1000,76 @@ app.addEventListener('submit', async e => {
   const stars = Number($('#gfStars').value || 0);
   const reserved = $('#gfReserved').value === 'true';
   const description = $('#gfDescription').value.trim();
-  const traits = {
-    model: { name: model, chance: $('#gfModelChance').value.trim() || '1.5%' },
-    pattern: { name: $('#gfPattern').value.trim() || 'Starlight', chance: $('#gfPatternChance').value.trim() || '0.5%' },
-    backdrop: { name: $('#gfBackdrop').value.trim() || 'Onyx Dark', chance: $('#gfBackdropChance').value.trim() || '1.5%' }
-  };
+  const modelChance = $('#gfModelChance').value.trim() || '1.5%';
+  const pattern = $('#gfPattern').value.trim() || 'Starlight';
+  const patternChance = $('#gfPatternChance').value.trim() || '0.5%';
+  const backdrop = $('#gfBackdrop').value.trim() || 'Onyx Dark';
+  const backdropChance = $('#gfBackdropChance').value.trim() || '1.5%';
 
-  if (isEditing && existingGift) {
-    if (existingGift.isCustom) {
-      const updated = {
-        ...existingGift,
-        name,
-        number,
-        model,
-        file: avatarData,
-        video: previewData,
-        previewIsVideo,
-        sku: number,
-        prices: { TON: ton, BYN: byn, STARS: stars },
-        subtitle: `Коллекционный подарок · модель ${model}`,
-        description,
-        reserved,
-        traits
-      };
-      await saveCustomGiftToDB(updated);
-      CUSTOM_GIFTS = CUSTOM_GIFTS.map(x => x.id === updated.id ? updated : x);
-    } else {
-      // Save override for built-in gift (heavy media files go to IndexedDB if changed, text fields to localStorage)
-      const overrides = JSON.parse(localStorage.getItem('giftMarketEditedOverrides') || '{}');
-      const ov = {
-        name,
-        number,
-        sku: number,
-        model,
-        prices: { TON: ton, BYN: byn, STARS: stars },
-        description,
-        reserved,
-        traits
-      };
-      if (avatarInput.files[0]) ov.file = avatarData;
-      if (previewInput.files[0]) {
-        ov.video = previewData;
-        ov.previewIsVideo = previewIsVideo;
-      }
-      overrides[existingGift.id] = { ...(overrides[existingGift.id] || {}), ...ov };
-      try {
-        localStorage.setItem('giftMarketEditedOverrides', JSON.stringify(overrides));
-      } catch (err) {
-        // Fallback: store full modified copy in IndexedDB and hide original default id
-        const dbCopy = {
-          ...existingGift,
-          ...ov,
-          id: 'custom_' + Date.now(),
-          isCustom: true
-        };
-        await saveCustomGiftToDB(dbCopy);
-        CUSTOM_GIFTS.push(dbCopy);
-        const hidden = JSON.parse(localStorage.getItem('giftMarketHiddenIds') || '[]');
-        if (!hidden.includes(existingGift.id)) hidden.push(existingGift.id);
-        localStorage.setItem('giftMarketHiddenIds', JSON.stringify(hidden));
-      }
-      const resOv = JSON.parse(localStorage.getItem('giftMarketReservedOverrides') || '{}');
-      resOv[existingGift.id] = reserved;
-      localStorage.setItem('giftMarketReservedOverrides', JSON.stringify(resOv));
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  showToast('Сохранение на сервер...');
+
+  try {
+    const fd = new FormData();
+    fd.append('name', name);
+    fd.append('number', number);
+    fd.append('model', model);
+    fd.append('modelChance', modelChance);
+    fd.append('pattern', pattern);
+    fd.append('patternChance', patternChance);
+    fd.append('backdrop', backdrop);
+    fd.append('backdropChance', backdropChance);
+    fd.append('priceTon', String(ton));
+    fd.append('priceByn', String(byn));
+    fd.append('priceStars', String(stars));
+    fd.append('reserved', String(reserved));
+    fd.append('description', description);
+
+    if (avatarInput.files[0]) {
+      fd.append('avatar', avatarInput.files[0]);
+    }
+    const previewInput = $('#gfPreviewFile');
+    if (previewInput.files[0]) {
+      fd.append('preview', previewInput.files[0]);
     }
 
+    const url = isEditing ? `/api/gifts/${encodeURIComponent(editingGiftId)}` : '/api/gifts';
+    const method = isEditing ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'x-admin-password': getAdminPassword() },
+      body: fd
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Ошибка сервера');
+    }
+
+    const updatedList = await res.json();
+    GIFTS = updatedList;
     editingGiftId = null;
-    rebuildGiftsList();
+
     cart = cart.filter(line => {
       const item = getGift(line.id);
       return item && !item.reserved;
     });
     saveCart();
     renderCart();
-    showToast(`Изменения для «${name}» сохранены!`);
-    render();
-    return;
+
+    showToast(isEditing ? `Изменения для «${name}» сохранены для всех!` : `Подарок «${name}» опубликован для всех!`);
+    if (isEditing) {
+      render();
+    } else {
+      location.hash = 'catalog';
+    }
+  } catch (err) {
+    showToast('Ошибка: ' + err.message);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
   }
-
-  const newGift = {
-    id: 'custom_' + Date.now(),
-    name,
-    number,
-    model,
-    file: avatarData,
-    video: previewData,
-    previewIsVideo,
-    sku: number,
-    prices: { TON: ton, BYN: byn, STARS: stars },
-    subtitle: `Коллекционный подарок · модель ${model}`,
-    description,
-    glow: '#414448',
-    reserved,
-    isCustom: true,
-    traits
-  };
-
-  await saveCustomGiftToDB(newGift);
-  CUSTOM_GIFTS.push(newGift);
-  rebuildGiftsList();
-  showToast(`Подарок «${name}» добавлен в каталог!`);
-  location.hash = 'catalog';
 });
 
 // Управление подарками (Выход / Редактирование / Бронь / Удаление / Экспорт)
@@ -1181,6 +1078,7 @@ app.addEventListener('click', async e => {
     adminUnlocked = false;
     editingGiftId = null;
     sessionStorage.removeItem('gmAdminUnlocked');
+    sessionStorage.removeItem('gmAdminPass');
     showToast('Вы вышли из панели администратора');
     location.hash = 'home';
     return;
@@ -1203,54 +1101,52 @@ app.addEventListener('click', async e => {
   const toggleBtn = e.target.closest('[data-toggle-reserve]');
   if (toggleBtn) {
     const id = toggleBtn.dataset.toggleReserve;
-    const g = getGift(id);
-    if (!g) return;
-    if (g.isCustom) {
-      g.reserved = !g.reserved;
-      await saveCustomGiftToDB(g);
-    } else {
-      const overrides = JSON.parse(localStorage.getItem('giftMarketReservedOverrides') || '{}');
-      overrides[id] = !g.reserved;
-      localStorage.setItem('giftMarketReservedOverrides', JSON.stringify(overrides));
+    try {
+      const res = await fetch(`/api/gifts/${encodeURIComponent(id)}/reserve`, {
+        method: 'PATCH',
+        headers: { 'x-admin-password': getAdminPassword() }
+      });
+      if (!res.ok) throw new Error('Ошибка изменения брони');
+      GIFTS = await res.json();
+      cart = cart.filter(line => {
+        const item = getGift(line.id);
+        return item && !item.reserved;
+      });
+      saveCart();
+      renderCart();
+      render();
+      const g = getGift(id);
+      showToast(g && g.reserved ? 'Подарок переведён в бронь' : 'Статус брони снят');
+    } catch (err) {
+      showToast('Не удалось обновить статус');
     }
-    rebuildGiftsList();
-    cart = cart.filter(line => {
-      const item = getGift(line.id);
-      return item && !item.reserved;
-    });
-    saveCart();
-    renderCart();
-    render();
-    showToast(g.reserved ? 'Статус брони снят' : 'Подарок переведён в бронь');
     return;
   }
 
   const delBtn = e.target.closest('[data-delete-gift]');
   if (delBtn) {
     const id = delBtn.dataset.deleteGift;
-    const g = getGift(id);
-    if (!g) return;
     if (editingGiftId === id) editingGiftId = null;
-    if (g.isCustom) {
-      await deleteCustomGiftFromDB(id);
-      CUSTOM_GIFTS = CUSTOM_GIFTS.filter(x => x.id !== id);
-    } else {
-      const hidden = JSON.parse(localStorage.getItem('giftMarketHiddenIds') || '[]');
-      if (!hidden.includes(id)) hidden.push(id);
-      localStorage.setItem('giftMarketHiddenIds', JSON.stringify(hidden));
+    try {
+      const res = await fetch(`/api/gifts/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'x-admin-password': getAdminPassword() }
+      });
+      if (!res.ok) throw new Error('Ошибка удаления');
+      GIFTS = await res.json();
+      cart = cart.filter(line => line.id !== id);
+      saveCart();
+      renderCart();
+      render();
+      showToast('Подарок удалён для всех пользователей');
+    } catch (err) {
+      showToast('Не удалось удалить подарок');
     }
-    rebuildGiftsList();
-    cart = cart.filter(line => line.id !== id);
-    saveCart();
-    renderCart();
-    render();
-    showToast('Подарок удалён из каталога');
     return;
   }
 
   if (e.target.closest('#exportCatalogBtn')) {
-    const cleanData = GIFTS.map(({ file, video, ...rest }) => rest);
-    const blob = new Blob([JSON.stringify(cleanData, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(GIFTS, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'gifts_catalog.json';
@@ -1276,28 +1172,45 @@ if (secretTrigger) {
 }
 
 // Проверка пароля при входе в админку
-app.addEventListener('submit', e => {
+app.addEventListener('submit', async e => {
   if (e.target.id !== 'adminLoginForm') return;
   e.preventDefault();
   const val = ($('#adminPassInput')?.value || '').trim();
-  if (val === 'n3yranftlox228') {
-    adminUnlocked = true;
-    sessionStorage.setItem('gmAdminUnlocked', '1');
-    showToast('Доступ разрешён');
-    render();
-  } else {
-    showToast('Неверный пароль');
-    if ($('#adminPassInput')) $('#adminPassInput').value = '';
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: val })
+    });
+    if (res.ok) {
+      adminUnlocked = true;
+      sessionStorage.setItem('gmAdminUnlocked', '1');
+      sessionStorage.setItem('gmAdminPass', val);
+      showToast('Доступ разрешён');
+      render();
+      return;
+    }
+  } catch (err) {
+    // Локальный режим без сервера
+    if (val === 'n3yranftlox228') {
+      adminUnlocked = true;
+      sessionStorage.setItem('gmAdminUnlocked', '1');
+      sessionStorage.setItem('gmAdminPass', val);
+      showToast('Доступ разрешён (локальный режим)');
+      render();
+      return;
+    }
   }
+  showToast('Неверный пароль');
+  if ($('#adminPassInput')) $('#adminPassInput').value = '';
 });
 
 render();
 renderCart();
 
-(async function syncCustomGiftsOnStart() {
-  try {
-    CUSTOM_GIFTS = await loadCustomGifts();
-    rebuildGiftsList();
+(async function syncGiftsFromServerOnStart() {
+  const ok = await fetchServerGifts();
+  if (ok) {
     cart = cart.filter(line => {
       const g = getGift(line.id);
       return g && !g.reserved;
@@ -1305,8 +1218,6 @@ renderCart();
     saveCart();
     render();
     renderCart();
-  } catch (err) {
-    console.error(err);
   }
 })();
 

@@ -1,0 +1,477 @@
+const express = require('express');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'n3yranftlox228';
+
+// GitHub Persistence (бесплатное вечное хранение на бесплатном тарифе Render!)
+// Достаточно указать в Render Environment Variables:
+// GITHUB_TOKEN = ваш Personal Access Token (с правами repo / contents:write)
+// GITHUB_REPO  = username/repo-name (например: geminiappa/gift-market)
+// GITHUB_BRANCH = main (по умолчанию main)
+const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || '').trim();
+const GITHUB_REPO = (process.env.GITHUB_REPO || '').trim();
+const GITHUB_BRANCH = (process.env.GITHUB_BRANCH || 'main').trim();
+const GITHUB_BASE_PATH = (process.env.GITHUB_BASE_PATH || '').replace(/^\/|\/$/g, '');
+
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+const GIFTS_FILE = path.join(DATA_DIR, 'gifts.json');
+
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const DEFAULT_GIFTS = [
+  {
+    id: 'kakashka',
+    name: 'Happy Brownie',
+    number: '#200 024',
+    model: 'Deadpoo',
+    file: 'assets/gifts/deadpoo-60fps.webp',
+    video: 'assets/source/kakashka.mp4',
+    previewIsVideo: true,
+    sku: '#200 024',
+    prices: { TON: 8, BYN: 27, STARS: 550 },
+    subtitle: 'Коллекционный подарок · модель Deadpoo',
+    description: 'Happy Brownie #200 024 — коллекционный подарок в модели Deadpoo. Анимированная фигурка с оригинальной отделкой и яркими деталями.',
+    glow: '#424044',
+    reserved: false,
+    traits: {
+      model: { name: 'Deadpoo', chance: '2%' },
+      pattern: { name: 'Pyramid', chance: '0.5%' },
+      backdrop: { name: 'Battleship Grey', chance: '1%' }
+    }
+  },
+  {
+    id: 'rabbit',
+    name: 'Pool Float',
+    number: '#110 493',
+    model: 'Air Bunny',
+    file: 'assets/gifts/air-bunny-60fps.webp',
+    video: 'assets/source/rabbit.mp4',
+    previewIsVideo: true,
+    sku: '#110 493',
+    prices: { TON: 8, BYN: 27, STARS: 550 },
+    subtitle: 'Коллекционный подарок · модель Air Bunny',
+    description: 'Pool Float #110 493 — модель Air Bunny. Белый надувной круг с кроликом и морковкой, представленный в виде оригинальной анимации.',
+    glow: '#414448',
+    reserved: false,
+    traits: {
+      model: { name: 'Air Bunny', chance: '3%' },
+      pattern: { name: 'Carrot', chance: '0.5%' },
+      backdrop: { name: 'Sapphire', chance: '1.5%' }
+    }
+  },
+  {
+    id: 'tank',
+    name: 'Pool Float',
+    number: '#52 138',
+    model: 'Water Tank',
+    file: 'assets/gifts/water-tank-60fps.webp',
+    video: 'assets/source/tank.mp4',
+    previewIsVideo: true,
+    sku: '#52 138',
+    prices: { TON: 8, BYN: 27, STARS: 550 },
+    subtitle: 'Коллекционный подарок · модель Water Tank',
+    description: 'Pool Float #52 138 — модель Water Tank. Необычный водный танк с утёнком и брызгами. Сейчас подарок находится в брони.',
+    glow: '#3f4441',
+    reserved: true,
+    traits: {
+      model: { name: 'Water Tank', chance: '1.5%' },
+      pattern: { name: 'Coffee Bean', chance: '0.2%' },
+      backdrop: { name: 'Mint Green', chance: '1.5%' }
+    }
+  },
+  {
+    id: 'torch',
+    name: 'Chill Flame',
+    number: '#28 962',
+    model: 'Lego',
+    file: 'assets/gifts/lego-60fps.webp',
+    video: 'assets/source/torch.mp4',
+    previewIsVideo: true,
+    sku: '#28 962',
+    prices: { TON: 6, BYN: 20, STARS: 460 },
+    subtitle: 'Коллекционный подарок · модель Lego',
+    description: 'Chill Flame #28 962 — модель Lego. Детализированный факел с ярким пламенем и анимированным движением.',
+    glow: '#45413e',
+    reserved: false,
+    traits: {
+      model: { name: 'Lego', chance: '3%' },
+      pattern: { name: 'Nemes', chance: '0.4%' },
+      backdrop: { name: 'Shamrock Green', chance: '1.5%' }
+    }
+  },
+  {
+    id: 'button',
+    name: 'Input Key',
+    number: '#21 990',
+    model: 'Astrobot',
+    file: 'assets/gifts/astrobot-60fps.webp',
+    video: 'assets/source/button.mp4',
+    previewIsVideo: true,
+    sku: '#21 990',
+    prices: { TON: 15, BYN: 50, STARS: 1150 },
+    subtitle: 'Коллекционный подарок · модель Astrobot',
+    description: 'Input Key #21 990 — модель Astrobot. Футуристичная клавиша с тёмным дисплеем и металлическим корпусом.',
+    glow: '#3e4147',
+    reserved: false,
+    traits: {
+      model: { name: 'Astrobot', chance: '1.5%' },
+      pattern: { name: 'Succubus', chance: '0.5%' },
+      backdrop: { name: 'French Blue', chance: '1.5%' }
+    }
+  }
+];
+
+function ghRepoPath(relPath) {
+  return GITHUB_BASE_PATH ? `${GITHUB_BASE_PATH}/${relPath}` : relPath;
+}
+
+async function githubPutFile(relPath, bufferContent, commitMessage) {
+  if (!GITHUB_TOKEN || !GITHUB_REPO) return false;
+  const fullRepoPath = ghRepoPath(relPath);
+  const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/${fullRepoPath}`;
+  const headers = {
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'GiftMarket-Render-App',
+    'Content-Type': 'application/json'
+  };
+
+  let sha = undefined;
+  try {
+    const getRes = await fetch(`${apiUrl}?ref=${encodeURIComponent(GITHUB_BRANCH)}`, { headers });
+    if (getRes.ok) {
+      const existing = await getRes.json();
+      sha = existing.sha;
+    }
+  } catch (e) {}
+
+  const body = {
+    message: commitMessage,
+    content: bufferContent.toString('base64'),
+    branch: GITHUB_BRANCH
+  };
+  if (sha) body.sha = sha;
+
+  const putRes = await fetch(apiUrl, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(body)
+  });
+
+  if (!putRes.ok) {
+    const txt = await putRes.text();
+    console.error('GitHub sync failed for', fullRepoPath, putRes.status, txt);
+    return false;
+  }
+  return true;
+}
+
+async function githubFetchGifts() {
+  if (!GITHUB_TOKEN || !GITHUB_REPO) return null;
+  const fullRepoPath = ghRepoPath('data/gifts.json');
+  const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/${fullRepoPath}?ref=${encodeURIComponent(GITHUB_BRANCH)}`;
+  try {
+    const res = await fetch(apiUrl, {
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'GiftMarket-Render-App'
+      }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const decoded = Buffer.from(data.content, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      fs.writeFileSync(GIFTS_FILE, JSON.stringify(parsed, null, 2), 'utf8');
+      return parsed;
+    }
+  } catch (e) {
+    console.error('GitHub initial fetch error:', e.message);
+  }
+  return null;
+}
+
+function readGifts() {
+  if (!fs.existsSync(GIFTS_FILE)) {
+    fs.writeFileSync(GIFTS_FILE, JSON.stringify(DEFAULT_GIFTS, null, 2), 'utf8');
+    return DEFAULT_GIFTS;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(GIFTS_FILE, 'utf8'));
+  } catch (e) {
+    return DEFAULT_GIFTS;
+  }
+}
+
+async function writeGifts(list, commitMsg = 'Update gifts catalog') {
+  const jsonStr = JSON.stringify(list, null, 2);
+  fs.writeFileSync(GIFTS_FILE, jsonStr, 'utf8');
+  if (GITHUB_TOKEN && GITHUB_REPO) {
+    await githubPutFile('data/gifts.json', Buffer.from(jsonStr, 'utf8'), commitMsg);
+  }
+}
+
+// Загружаем актуальную базу из GitHub при старте контейнера Render
+(async () => {
+  const remoteList = await githubFetchGifts();
+  if (!remoteList) {
+    readGifts();
+  }
+})();
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase() || '.bin';
+    const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+    cb(null, safeName);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 }
+});
+
+app.use(express.json());
+app.use('/uploads', express.static(UPLOADS_DIR));
+// Если файл в /uploads пропал после сна бесплатного контейнера Render — подтягиваем его напрямую из GitHub!
+app.get('/uploads/:filename', async (req, res) => {
+  const safeFile = path.basename(req.params.filename);
+  const localPath = path.join(UPLOADS_DIR, safeFile);
+  if (fs.existsSync(localPath)) {
+    return res.sendFile(localPath);
+  }
+  if (GITHUB_TOKEN && GITHUB_REPO) {
+    try {
+      const fullRepoPath = ghRepoPath(`data/uploads/${safeFile}`);
+      const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/${fullRepoPath}?ref=${encodeURIComponent(GITHUB_BRANCH)}`;
+      const ghRes = await fetch(apiUrl, {
+        headers: {
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github.raw+json',
+          'User-Agent': 'GiftMarket-Render-App'
+        }
+      });
+      if (ghRes.ok) {
+        const arrBuf = await ghRes.arrayBuffer();
+        const buf = Buffer.from(arrBuf);
+        fs.writeFileSync(localPath, buf);
+        return res.sendFile(localPath);
+      }
+    } catch (e) {
+      console.error('GitHub media restore error:', e.message);
+    }
+  }
+  res.status(404).send('File not found');
+});
+
+app.use(express.static(__dirname));
+
+function checkAdmin(req, res, next) {
+  const pass = req.headers['x-admin-password'];
+  if (pass !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Неверный пароль администратора' });
+  }
+  next();
+}
+
+app.post('/api/login', (req, res) => {
+  const { password } = req.body || {};
+  if (password === ADMIN_PASSWORD) {
+    return res.json({ ok: true, persistentGithub: Boolean(GITHUB_TOKEN && GITHUB_REPO) });
+  }
+  return res.status(401).json({ error: 'Неверный пароль' });
+});
+
+app.get('/api/gifts', (req, res) => {
+  res.json(readGifts());
+});
+
+app.post(
+  '/api/gifts',
+  checkAdmin,
+  upload.fields([
+    { name: 'avatar', maxCount: 1 },
+    { name: 'preview', maxCount: 1 }
+  ]),
+  async (req, res) => {
+    try {
+      const avatarFile = req.files?.avatar?.[0];
+      if (!avatarFile) {
+        return res.status(400).json({ error: 'Загрузите картинку или гифку подарка' });
+      }
+
+      if (GITHUB_TOKEN && GITHUB_REPO) {
+        await githubPutFile(
+          `data/uploads/${avatarFile.filename}`,
+          fs.readFileSync(avatarFile.path),
+          `Upload gift avatar ${avatarFile.filename}`
+        );
+      }
+
+      const previewFile = req.files?.preview?.[0];
+      if (previewFile && GITHUB_TOKEN && GITHUB_REPO) {
+        await githubPutFile(
+          `data/uploads/${previewFile.filename}`,
+          fs.readFileSync(previewFile.path),
+          `Upload gift preview ${previewFile.filename}`
+        );
+      }
+
+      const avatarUrl = `uploads/${avatarFile.filename}`;
+      const previewUrl = previewFile ? `uploads/${previewFile.filename}` : avatarUrl;
+      const previewIsVideo = previewFile ? previewFile.mimetype.startsWith('video/') : false;
+
+      const body = req.body || {};
+      const rawNum = (body.number || '#10 001').trim();
+      const number = rawNum.startsWith('#') ? rawNum : `#${rawNum}`;
+      const model = (body.model || 'Original').trim();
+
+      const newGift = {
+        id: 'gift_' + Date.now(),
+        name: (body.name || 'New Gift').trim(),
+        number,
+        model,
+        file: avatarUrl,
+        video: previewUrl,
+        previewIsVideo,
+        sku: number,
+        prices: {
+          TON: Number(body.priceTon || 0),
+          BYN: Number(body.priceByn || 0),
+          STARS: Number(body.priceStars || 0)
+        },
+        subtitle: `Коллекционный подарок · модель ${model}`,
+        description: (body.description || '').trim(),
+        glow: '#414448',
+        reserved: body.reserved === 'true',
+        traits: {
+          model: { name: model, chance: (body.modelChance || '1.5%').trim() },
+          pattern: { name: (body.pattern || 'Starlight').trim(), chance: (body.patternChance || '0.5%').trim() },
+          backdrop: { name: (body.backdrop || 'Onyx Dark').trim(), chance: (body.backdropChance || '1.5%').trim() }
+        }
+      };
+
+      const list = readGifts();
+      list.push(newGift);
+      await writeGifts(list, `Add gift ${newGift.name} ${newGift.number}`);
+      res.json(list);
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Ошибка сохранения подарка' });
+    }
+  }
+);
+
+app.put(
+  '/api/gifts/:id',
+  checkAdmin,
+  upload.fields([
+    { name: 'avatar', maxCount: 1 },
+    { name: 'preview', maxCount: 1 }
+  ]),
+  async (req, res) => {
+    try {
+      const list = readGifts();
+      const idx = list.findIndex(g => g.id === req.params.id);
+      if (idx === -1) {
+        return res.status(404).json({ error: 'Подарок не найден' });
+      }
+
+      const existing = list[idx];
+      const body = req.body || {};
+      const rawNum = (body.number || existing.number).trim();
+      const number = rawNum.startsWith('#') ? rawNum : `#${rawNum}`;
+      const model = (body.model || existing.model).trim();
+
+      const avatarFile = req.files?.avatar?.[0];
+      const previewFile = req.files?.preview?.[0];
+
+      if (avatarFile && GITHUB_TOKEN && GITHUB_REPO) {
+        await githubPutFile(
+          `data/uploads/${avatarFile.filename}`,
+          fs.readFileSync(avatarFile.path),
+          `Update gift avatar ${avatarFile.filename}`
+        );
+      }
+      if (previewFile && GITHUB_TOKEN && GITHUB_REPO) {
+        await githubPutFile(
+          `data/uploads/${previewFile.filename}`,
+          fs.readFileSync(previewFile.path),
+          `Update gift preview ${previewFile.filename}`
+        );
+      }
+
+      const fileUrl = avatarFile ? `uploads/${avatarFile.filename}` : existing.file;
+      let videoUrl = existing.video;
+      let previewIsVideo = existing.previewIsVideo;
+
+      if (previewFile) {
+        videoUrl = `uploads/${previewFile.filename}`;
+        previewIsVideo = previewFile.mimetype.startsWith('video/');
+      } else if (avatarFile && existing.video === existing.file) {
+        videoUrl = fileUrl;
+        previewIsVideo = false;
+      }
+
+      list[idx] = {
+        ...existing,
+        name: (body.name || existing.name).trim(),
+        number,
+        sku: number,
+        model,
+        file: fileUrl,
+        video: videoUrl,
+        previewIsVideo,
+        prices: {
+          TON: Number(body.priceTon ?? existing.prices.TON),
+          BYN: Number(body.priceByn ?? existing.prices.BYN),
+          STARS: Number(body.priceStars ?? existing.prices.STARS)
+        },
+        subtitle: `Коллекционный подарок · модель ${model}`,
+        description: (body.description ?? existing.description).trim(),
+        reserved: body.reserved === 'true',
+        traits: {
+          model: { name: model, chance: (body.modelChance || existing.traits.model.chance).trim() },
+          pattern: { name: (body.pattern || existing.traits.pattern.name).trim(), chance: (body.patternChance || existing.traits.pattern.chance).trim() },
+          backdrop: { name: (body.backdrop || existing.traits.backdrop.name).trim(), chance: (body.backdropChance || existing.traits.backdrop.chance).trim() }
+        }
+      };
+
+      await writeGifts(list, `Edit gift ${list[idx].name} ${list[idx].number}`);
+      res.json(list);
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Ошибка обновления подарка' });
+    }
+  }
+);
+
+app.patch('/api/gifts/:id/reserve', checkAdmin, async (req, res) => {
+  const list = readGifts();
+  const item = list.find(g => g.id === req.params.id);
+  if (!item) return res.status(404).json({ error: 'Подарок не найден' });
+  item.reserved = !item.reserved;
+  await writeGifts(list, `Toggle reserve ${item.name} ${item.number}`);
+  res.json(list);
+});
+
+app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
+  let list = readGifts();
+  const target = list.find(g => g.id === req.params.id);
+  list = list.filter(g => g.id !== req.params.id);
+  await writeGifts(list, `Delete gift ${target ? target.name : req.params.id}`);
+  res.json(list);
+});
+
+app.listen(PORT, () => {
+  console.log(`GIFT MARKET server running on port ${PORT}`);
+  if (GITHUB_TOKEN && GITHUB_REPO) {
+    console.log(`GitHub persistent sync enabled -> ${GITHUB_REPO} (${GITHUB_BRANCH})`);
+  }
+});
