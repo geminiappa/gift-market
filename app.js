@@ -435,7 +435,7 @@ function renderAdmin() {
       <div class="eyebrow">STUDIO & CREATOR PANEL</div>
       <h1>${editItem ? 'Редактировать' : 'Добавить'} <span>подарок.</span></h1>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:12px;">
+    <div class="admin-head-actions" style="display:flex;flex-direction:column;align-items:flex-start;gap:12px;">
       <p style="margin:0">Управляй каталогом, редактируй цены и характеристики или добавляй новые NFT-подарки.</p>
       <button type="button" class="button button-dark" id="adminLogoutBtn" style="padding:10px 15px;">Выйти из админки <span>×</span></button>
     </div>
