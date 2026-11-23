@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101113">
+  <meta name="description" content="GIFT MARKET — магазин цифровых подарков. Выбирай подарки и удобную валюту.">
+  <title>GIFT MARKET — цифровые подарки</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/jpeg" href="assets/logo.jpg">
+  <link rel="shortcut icon" type="image/jpeg" href="assets/logo.jpg">
+  <link rel="apple-touch-icon" href="assets/logo.jpg">
+</head>
+<body>
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+  <header class="site-header">
+    <a class="brand" href="#home" aria-label="GIFT MARKET — главная">
+      <img src="assets/logo.jpg" alt="GIFT MARKET" class="brand-logo">
+      <span class="brand-name">GIFT<span>MARKET</span><small>DIGITAL GOODS STORE</small></span>
+    </a>
+    <nav class="main-nav" aria-label="Основная навигация">
+      <a href="#home" data-nav="home">Главная</a>
+      <a href="#catalog" data-nav="catalog">Каталог</a>
+      <a href="#about" data-nav="about">О магазине</a>
+      <a href="#payment" data-nav="payment">Оплата</a>
+      <a href="#faq" data-nav="faq">FAQ</a>
+      <a href="#contacts" data-nav="contacts">Контакты</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-button cart-trigger" id="openCart" aria-label="Открыть корзину"><span class="bag-icon">▱</span><span class="cart-count" id="cartCount">0</span></button>
+      <button class="mobile-menu-trigger" id="mobileMenuTrigger" aria-label="Открыть меню"><i></i><i></i></button>
+    </div>
+  </header>
+
+  <nav class="mobile-nav" id="mobileNav" aria-label="Мобильная навигация">
+    <a href="#home" data-nav="home">Главная</a><a href="#catalog" data-nav="catalog">Каталог</a><a href="#about" data-nav="about">О магазине</a>
+    <a href="#payment" data-nav="payment">Оплата</a><a href="#faq" data-nav="faq">FAQ</a><a href="#contacts" data-nav="contacts">Контакты</a>
+  </nav>
+
+  <main id="app" class="page-shell" aria-live="polite"></main>
+
+  <footer class="site-footer">
+    <div class="footer-main">
+      <a class="brand" href="#home">
+        <img src="assets/logo.jpg" alt="GIFT MARKET" class="brand-logo">
+        <span class="brand-name">GIFT<span>MARKET</span><small>DIGITAL GOODS STORE</small></span>
+      </a>
+      <p>Цифровые подарки.<br><span>Минимализм в каждой детали.</span></p>
+      <div class="footer-links"><a href="#catalog">Каталог</a><a href="#contacts">Контакты</a></div>
+    </div>
+    <div class="footer-bottom"><span id="secretAdminTrigger" style="cursor:default;user-select:none;">© 2026 GIFT MARKET</span><span>TON · BYN · TELEGRAM STARS</span><a href="#home">НАВЕРХ ↑</a></div>
+  </footer>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="cart-panel" id="cartPanel" aria-label="Корзина">
+    <div class="panel-head"><div><span class="overline">YOUR SELECTION</span><h2>Корзина</h2></div><button class="close-button" id="closeCart" aria-label="Закрыть">×</button></div>
+    <div class="cart-currency"><label for="cartCurrency">Валюта заказа</label><select id="cartCurrency"><option value="TON">TON</option><option value="BYN">BYN</option><option value="STARS">STARS</option></select></div>
+    <div class="cart-lines" id="cartItems"></div>
+    <div class="cart-bottom"><div class="cart-total"><span>Итого</span><strong id="cartTotal">0 TON</strong></div><button class="button button-light button-full" id="checkoutButton">Оформить заказ <span>↗</span></button><p class="tiny-note">Каждый подарок доступен в 1 экземпляре. При оформлении откроются контакты админов.</p></div>
+  </aside>
+
+  <div class="modal-layer" id="modalLayer" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card"><button class="close-button modal-x" id="closeModal" aria-label="Закрыть">×</button><div id="modalContent"></div></div>
+  </div>
+
+  <!-- Модальное окно просмотра NFT-подарка с видео и шансами из Telegram (без дублирования текста) -->
+  <div id="tg-gift-modal" class="tg-modal-overlay" onclick="closeTgGiftModal()">
+    <div class="tg-modal-card" onclick="event.stopPropagation()">
+      <button class="tg-modal-close" onclick="closeTgGiftModal()" aria-label="Закрыть">×</button>
+      
+      <div id="tg-modal-preview" class="tg-modal-preview">
+        <video id="tg-modal-video" class="tg-modal-video" autoplay loop muted playsinline></video>
+      </div>
+
+      <div class="tg-modal-body">
+        <div class="tg-traits-table">
+          <div class="tg-trait-row">
+            <span class="tg-trait-label">Модель</span>
+            <div class="tg-trait-value">
+              <span id="trait-model-name">Lego</span>
+              <span id="trait-model-chance" class="tg-chance-pill">3%</span>
+            </div>
+          </div>
+          <div class="tg-trait-row">
+            <span class="tg-trait-label">Узор</span>
+            <div class="tg-trait-value">
+              <span id="trait-pattern-name">Nemes</span>
+              <span id="trait-pattern-chance" class="tg-chance-pill">0.4%</span>
+            </div>
+          </div>
+          <div class="tg-trait-row">
+            <span class="tg-trait-label">Фон</span>
+            <div class="tg-trait-value">
+              <span id="trait-bg-name">Shamrock Green</span>
+              <span id="trait-bg-chance" class="tg-chance-pill">1.5%</span>
+            </div>
+          </div>
+        </div>
+
+        <button id="tg-modal-cart-btn" class="button button-light button-full">Добавить в корзину <span>＋</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
