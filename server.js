@@ -762,9 +762,9 @@ async function sendAdminManageList(chatId, oldMessageId = null) {
     tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
   }
   const list = readGifts();
-  const rows = list.map(g => ([
-    { text: `${g.reserved ? '[БРОНЬ]' : '[В НАЛ]'} ${g.name} ${g.number}`, callback_data: `adm_tog_${g.id}` },
-    { text: 'Удалить', callback_data: `adm_del_${g.id}` }
+  const rows = list.map((g, idx) => ([
+    { text: `${g.reserved ? '[БРОНЬ]' : '[В НАЛ]'} ${g.name} ${g.number}`, callback_data: `adm_tog_${idx}` },
+    { text: 'Удалить', callback_data: `adm_del_${idx}` }
   ]));
   rows.push([{ text: '＋ Добавить подарок', callback_data: 'adm_add' }]);
   rows.push([{ text: 'Назад в панель', callback_data: 'adm_panel' }]);
@@ -995,7 +995,6 @@ async function handleWizardInput(chatId, msg) {
         parse_mode: 'HTML'
       });
 
-      // Сразу показываем готовую карточку нового подарка с кнопкой «Открыть на сайте»
       await sendGiftCardWithAnimation(chatId, list.length - 1);
     } catch (err) {
       await tgApi('sendMessage', {
@@ -1055,7 +1054,6 @@ app.post('/telegram/webhook', async (req, res) => {
       return;
     }
 
-    // Если идёт пошаговое добавление подарка
     const handled = await handleWizardInput(chatId, msg);
     if (handled) return;
   }
@@ -1071,55 +1069,73 @@ app.post('/telegram/webhook', async (req, res) => {
     if (data === 'menu') {
       tgWizard.delete(chatId);
       await sendMainMenu(chatId, msgId);
-    } else if (data.startsWith('cat_')) {
+      return;
+    }
+
+    if (data.startsWith('cat_')) {
       const idx = Number(data.replace('cat_', '')) || 0;
       await sendGiftCardWithAnimation(chatId, idx, msgId);
-    } else if (data === 'adm_cancel') {
+      return;
+    }
+
+    if (data === 'adm_cancel') {
       tgWizard.delete(chatId);
       await tgApi('sendMessage', {
         chat_id: chatId,
         text: 'Действие отменено.',
         reply_markup: tgAdminAuth.has(chatId) ? getAdminPanelKeyboard() : getMainMenuKeyboard(chatId)
       });
-    } else if (data === 'adm_panel') {
-      if (!tgAdminAuth.has(chatId)) return;
-      tgWizard.delete(chatId);
-      await tgApi('sendMessage', {
-        chat_id: chatId,
-        text: '<b>Панель администратора GIFT MARKET</b>',
-        parse_mode: 'HTML',
-        reply_markup: getAdminPanelKeyboard()
-      });
-    } else if (data === 'adm_add') {
-      if (!tgAdminAuth.has(chatId)) return;
-      tgWizard.set(chatId, { step: 'name', data: {} });
-      await tgApi('sendMessage', {
-        chat_id: chatId,
-        text: 'Шаг 1/8. Введи <b>название подарка</b> (например: <code>Crystal Skull</code>):',
-        parse_mode: 'HTML',
-        reply_markup: { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] }
-      });
-    } else if (data === 'adm_manage') {
-      if (!tgAdminAuth.has(chatId)) return;
-      await sendAdminManageList(chatId, msgId);
-    } else if (data.startsWith('adm_tog_')) {
-      if (!tgAdminAuth.has(chatId)) return;
-      const id = data.replace('adm_tog_', '');
-      const list = readGifts();
-      const item = list.find(g => g.id === id);
-      if (item) {
-        item.reserved = !item.reserved;
-        await writeGifts(list, `Toggle reserve via TG bot: ${item.name}`);
+      return;
+    }
+
+    // Проверка авторизации для всех кнопок adm_* (если сервер перезагрузился — попросит пароль)
+    if (data.startsWith('adm_')) {
+      if (!tgAdminAuth.has(chatId)) {
+        tgWizard.set(chatId, { step: 'password', data: {} });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: 'Сессия админа истекла после перезапуска сервера. Введи <b>пароль администратора</b>:',
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] }
+        });
+        return;
       }
-      await sendAdminManageList(chatId, msgId);
-    } else if (data.startsWith('adm_del_')) {
-      if (!tgAdminAuth.has(chatId)) return;
-      const id = data.replace('adm_del_', '');
-      let list = readGifts();
-      const target = list.find(g => g.id === id);
-      list = list.filter(g => g.id !== id);
-      await writeGifts(list, `Delete via TG bot: ${target ? target.name : id}`);
-      await sendAdminManageList(chatId, msgId);
+
+      if (data === 'adm_panel') {
+        tgWizard.delete(chatId);
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: '<b>Панель администратора GIFT MARKET</b>',
+          parse_mode: 'HTML',
+          reply_markup: getAdminPanelKeyboard()
+        });
+      } else if (data === 'adm_add') {
+        tgWizard.set(chatId, { step: 'name', data: {} });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: 'Шаг 1/8. Введи <b>название подарка</b> (например: <code>Crystal Skull</code>):',
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] }
+        });
+      } else if (data === 'adm_manage') {
+        await sendAdminManageList(chatId, msgId);
+      } else if (data.startsWith('adm_tog_')) {
+        const idx = Number(data.replace('adm_tog_', ''));
+        const list = readGifts();
+        if (!Number.isNaN(idx) && list[idx]) {
+          list[idx].reserved = !list[idx].reserved;
+          await writeGifts(list, `Toggle reserve via TG bot: ${list[idx].name}`);
+        }
+        await sendAdminManageList(chatId, msgId);
+      } else if (data.startsWith('adm_del_')) {
+        const idx = Number(data.replace('adm_del_', ''));
+        const list = readGifts();
+        if (!Number.isNaN(idx) && list[idx]) {
+          const removed = list.splice(idx, 1)[0];
+          await writeGifts(list, `Delete via TG bot: ${removed.name}`);
+        }
+        await sendAdminManageList(chatId, msgId);
+      }
     }
   }
 });
