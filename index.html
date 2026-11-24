@@ -1,223 +1,80 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GIFT MARKET — Digital Gifts Store</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css" />
-  <style>
-    /* Фикс шапки и футера на случай если в style.css использованы старые имена классов */
-    .header-inner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      height: 70px;
-      gap: 20px;
-    }
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      text-decoration: none;
-    }
-    .brand-mark {
-      width: 38px;
-      height: 38px;
-      border-radius: 10px;
-      overflow: hidden;
-      flex-shrink: 0;
-      display: inline-flex;
-    }
-    .brand-mark img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-    .nav {
-      display: flex;
-      align-items: center;
-      gap: 24px;
-    }
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .footer-grid {
-      display: grid;
-      grid-template-columns: 1.6fr 0.7fr 0.7fr;
-      gap: 32px;
-      padding: 40px 0 28px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .footer-grid > div > a {
-      display: block;
-      margin-bottom: 8px;
-    }
-    .footer-bottom {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 18px 0 28px;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .legal-consent-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 9999;
-      background: rgba(0, 0, 0, 0.78);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-    }
-    .legal-consent-overlay.show {
-      display: flex;
-    }
-    .legal-consent-card {
-      width: 100%;
-      max-width: 440px;
-      background: #17181c;
-      border: 1px solid #2f3138;
-      border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
-    }
-    @media (max-width: 760px) {
-      .nav { display: none; }
-      .footer-grid { grid-template-columns: 1fr; gap: 22px; }
-    }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101113">
+  <meta name="description" content="GIFT MARKET — магазин цифровых подарков. Выбирай подарки и удобную валюту.">
+  <title>GIFT MARKET — цифровые подарки</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/jpeg" href="assets/logo.jpg">
+  <link rel="shortcut icon" type="image/jpeg" href="assets/logo.jpg">
+  <link rel="apple-touch-icon" href="assets/logo.jpg">
 </head>
 <body>
-  <div class="noise"></div>
-
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
   <header class="site-header">
-    <div class="container header-inner">
-      <a class="brand" href="#home" aria-label="GIFT MARKET">
-        <span class="brand-mark"><img src="assets/logo.jpg" alt="GIFT MARKET"></span>
-        <span>
-          <strong>GIFT<b>MARKET</b></strong>
-          <small>DIGITAL GOODS STORE</small>
-        </span>
-      </a>
-
-      <nav class="nav" id="mainNav">
-        <a href="#home" data-nav="home">Главная</a>
-        <a href="#catalog" data-nav="catalog">Каталог</a>
-        <a href="#about" data-nav="about">О магазине</a>
-        <a href="#faq" data-nav="faq">FAQ</a>
-        <a href="#contacts" data-nav="contacts">Контакты</a>
-      </nav>
-
-      <div class="header-actions">
-        <button class="cart-trigger" id="openCart" aria-label="Открыть корзину">
-          <span class="cart-icon">▱</span>
-          <span>Корзина</span>
-          <b id="cartCount">0</b>
-        </button>
-        <button class="menu-trigger" id="mobileMenuTrigger" aria-label="Открыть меню">
-          <span></span><span></span>
-        </button>
-      </div>
-    </div>
-
-    <div class="mobile-nav" id="mobileNav">
+    <a class="brand" href="#home" aria-label="GIFT MARKET — главная">
+      <img src="assets/logo.jpg" alt="GIFT MARKET" class="brand-logo">
+      <span class="brand-name">GIFT<span>MARKET</span><small>DIGITAL GOODS STORE</small></span>
+    </a>
+    <nav class="main-nav" aria-label="Основная навигация">
       <a href="#home" data-nav="home">Главная</a>
       <a href="#catalog" data-nav="catalog">Каталог</a>
       <a href="#about" data-nav="about">О магазине</a>
       <a href="#faq" data-nav="faq">FAQ</a>
       <a href="#contacts" data-nav="contacts">Контакты</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-button cart-trigger" id="openCart" aria-label="Открыть корзину"><span class="bag-icon">▱</span><span class="cart-count" id="cartCount">0</span></button>
+      <button class="mobile-menu-trigger" id="mobileMenuTrigger" aria-label="Открыть меню"><i></i><i></i></button>
     </div>
   </header>
 
-  <main id="app" class="container page-shell"></main>
+  <nav class="mobile-nav" id="mobileNav" aria-label="Мобильная навигация">
+    <a href="#home" data-nav="home">Главная</a><a href="#catalog" data-nav="catalog">Каталог</a><a href="#about" data-nav="about">О магазине</a><a href="#faq" data-nav="faq">FAQ</a><a href="#contacts" data-nav="contacts">Контакты</a>
+  </nav>
+
+  <main id="app" class="page-shell" aria-live="polite"></main>
 
   <footer class="site-footer">
-    <div class="container footer-grid">
-      <div>
-        <div class="footer-brand">GIFT<span>MARKET</span></div>
-        <p>Цифровые коллекционные подарки в лаконичном монохромном оформлении. Выбирай, собирай и оформляй заказ.</p>
-        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;font-size:11px;">
-          <a href="#privacy" style="color:#b8bac0;text-decoration:underline;text-underline-offset:3px;">Политика конфиденциальности</a>
-          <a href="#terms" style="color:#b8bac0;text-decoration:underline;text-underline-offset:3px;">Пользовательское соглашение</a>
-        </div>
-      </div>
-      <div>
-        <div class="footer-title">НАВИГАЦИЯ</div>
-        <a href="#home">Главная</a>
+    <div class="footer-main">
+      <a class="brand" href="#home">
+        <img src="assets/logo.jpg" alt="GIFT MARKET" class="brand-logo">
+        <span class="brand-name">GIFT<span>MARKET</span><small>DIGITAL GOODS STORE</small></span>
+      </a>
+      <p>Цифровые подарки.<br><span>Минимализм в каждой детали.</span></p>
+      <div class="footer-links">
         <a href="#catalog">Каталог</a>
-        <a href="#about">О магазине</a>
-        <a href="#faq">FAQ</a>
         <a href="#contacts">Контакты</a>
-      </div>
-      <div>
-        <div class="footer-title">КОНТАКТЫ</div>
-        <a href="https://t.me/giftmarket_by_bot" target="_blank" rel="noopener noreferrer">Бот: @giftmarket_by_bot</a>
-        <a href="https://t.me/n3yura" target="_blank" rel="noopener noreferrer">Админ: @n3yura</a>
-        <a href="https://t.me/NekosikN" target="_blank" rel="noopener noreferrer">Админ: @NekosikN</a>
+        <a href="#privacy">Политика конфиденциальности</a>
+        <a href="#terms">Пользовательское соглашение</a>
       </div>
     </div>
-    <div class="container footer-bottom">
-      <span id="secretAdminTrigger" style="cursor:default;user-select:none;" title="">GIFT MARKET · DIGITAL GIFT CATALOG</span>
-      <span>TON · BYN · TELEGRAM STARS</span>
-    </div>
+    <div class="footer-bottom"><span id="secretAdminTrigger" style="cursor:default;user-select:none;">© 2026 GIFT MARKET</span><span>TON · BYN · TELEGRAM STARS</span><a href="#home">НАВЕРХ ↑</a></div>
   </footer>
 
   <div class="scrim" id="scrim"></div>
   <aside class="cart-panel" id="cartPanel" aria-label="Корзина">
-    <div class="cart-head">
-      <div>
-        <span class="overline">YOUR COLLECTION</span>
-        <h2>Корзина</h2>
-      </div>
-      <button class="icon-close" id="closeCart" aria-label="Закрыть корзину">×</button>
-    </div>
-
-    <div class="currency-switch">
-      <span>ВАЛЮТА РАСЧЁТА</span>
-      <select id="cartCurrency" aria-label="Валюта">
-        <option value="TON">TON</option>
-        <option value="BYN">BYN</option>
-        <option value="STARS">STARS</option>
-      </select>
-    </div>
-
-    <div class="cart-items" id="cartItems"></div>
-
-    <div class="cart-foot">
-      <div class="total-row">
-        <span>ИТОГО</span>
-        <strong id="cartTotal">0 TON</strong>
-      </div>
-      <button class="button button-light button-full" id="checkoutButton">Оформить заказ <span>↗</span></button>
-      <p class="cart-note">Нажми, чтобы перейти в контакты и написать админу в Telegram.</p>
-    </div>
+    <div class="panel-head"><div><span class="overline">YOUR SELECTION</span><h2>Корзина</h2></div><button class="close-button" id="closeCart" aria-label="Закрыть">×</button></div>
+    <div class="cart-currency"><label for="cartCurrency">Валюта заказа</label><select id="cartCurrency"><option value="TON">TON</option><option value="BYN">BYN</option><option value="STARS">STARS</option></select></div>
+    <div class="cart-lines" id="cartItems"></div>
+    <div class="cart-bottom"><div class="cart-total"><span>Итого</span><strong id="cartTotal">0 TON</strong></div><button class="button button-light button-full" id="checkoutButton">Оформить заказ <span>↗</span></button><p class="tiny-note">Каждый подарок доступен в 1 экземпляре. При оформлении откроются контакты админов.</p></div>
   </aside>
 
-  <div class="modal-layer" id="modalLayer" aria-hidden="true">
-    <div class="modal-box">
-      <button class="icon-close modal-close" id="closeModal" aria-label="Закрыть окно">×</button>
-      <div id="modalContent"></div>
-    </div>
+  <div class="modal-layer" id="modalLayer" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card"><button class="close-button modal-x" id="closeModal" aria-label="Закрыть">×</button><div id="modalContent"></div></div>
   </div>
 
   <!-- Табличка ознакомления с политикой и соглашением при первом заходе -->
-  <div class="legal-consent-overlay" id="legalConsentModal" aria-hidden="true">
-    <div class="legal-consent-card">
+  <div class="modal-layer" id="legalConsentModal" role="dialog" aria-modal="true" aria-hidden="true" style="z-index:9999;">
+    <div class="modal-card" style="max-width:440px;">
       <div class="eyebrow" style="margin-bottom:8px;">ПРАВИЛА СЕРВИСА · G1FT MARKET</div>
-      <h3 style="font-size:18px;margin:0 0 10px;color:#fff;">Ознакомление с документами</h3>
-      <p style="font-size:12.5px;line-height:1.55;color:#b8bac0;margin:0 0 14px;">
-        Продолжая использование сайта <b style="color:#fff;">G1FT MARKET</b> и бота <b style="color:#fff;">@giftmarket_by_bot</b>, вы подтверждаете ознакомление и согласие с правилами сервиса:
+      <h3 style="font-size:18px;margin:0 0 10px;">Ознакомление с документами</h3>
+      <p style="font-size:12.5px;line-height:1.55;opacity:.75;margin:0 0 14px;">
+        Продолжая использование сайта <b>G1FT MARKET</b> и бота <b>@giftmarket_by_bot</b>, вы подтверждаете ознакомление и безоговорочное согласие с условиями работы сервиса:
       </p>
-      <div style="display:flex;flex-direction:column;gap:8px;margin:0 0 16px;">
+      <div style="display:flex;flex-direction:column;gap:8px;margin:0 0 14px;">
         <a class="button button-dark button-full" href="#privacy" id="consentOpenPrivacy">Политика конфиденциальности ↗</a>
         <a class="button button-dark button-full" href="#terms" id="consentOpenTerms">Пользовательское соглашение ↗</a>
       </div>
@@ -225,18 +82,13 @@
     </div>
   </div>
 
-  <div class="toast" id="toast"></div>
-
-  <!-- Telegram Gift Preview Modal -->
-  <div class="tg-modal-backdrop" id="tg-gift-modal" onclick="if(event.target === this) closeTgGiftModal()">
-    <div class="tg-modal-card">
-      <div class="tg-modal-preview" id="tg-modal-preview">
-        <button class="tg-modal-close" type="button" onclick="closeTgGiftModal()" aria-label="Закрыть">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-        <video class="tg-modal-video" id="tg-modal-video" autoplay loop muted playsinline></video>
+  <!-- Модальное окно просмотра NFT-подарка с видео и шансами из Telegram (без дублирования текста) -->
+  <div id="tg-gift-modal" class="tg-modal-overlay" onclick="closeTgGiftModal()">
+    <div class="tg-modal-card" onclick="event.stopPropagation()">
+      <button class="tg-modal-close" onclick="closeTgGiftModal()" aria-label="Закрыть">×</button>
+      
+      <div id="tg-modal-preview" class="tg-modal-preview">
+        <video id="tg-modal-video" class="tg-modal-video" autoplay loop muted playsinline></video>
       </div>
 
       <div class="tg-modal-body">
@@ -244,33 +96,32 @@
           <div class="tg-trait-row">
             <span class="tg-trait-label">Модель</span>
             <div class="tg-trait-value">
-              <span id="trait-model-name">Air Bunny</span>
-              <span class="tg-chance-pill" id="trait-model-chance">3%</span>
+              <span id="trait-model-name">Lego</span>
+              <span id="trait-model-chance" class="tg-chance-pill">3%</span>
             </div>
           </div>
           <div class="tg-trait-row">
             <span class="tg-trait-label">Узор</span>
             <div class="tg-trait-value">
-              <span id="trait-pattern-name">Carrot</span>
-              <span class="tg-chance-pill" id="trait-pattern-chance">0.5%</span>
+              <span id="trait-pattern-name">Nemes</span>
+              <span id="trait-pattern-chance" class="tg-chance-pill">0.4%</span>
             </div>
           </div>
           <div class="tg-trait-row">
             <span class="tg-trait-label">Фон</span>
             <div class="tg-trait-value">
-              <span id="trait-bg-name">Sapphire</span>
-              <span class="tg-chance-pill" id="trait-bg-chance">1.5%</span>
+              <span id="trait-bg-name">Shamrock Green</span>
+              <span id="trait-bg-chance" class="tg-chance-pill">1.5%</span>
             </div>
           </div>
         </div>
 
-        <div class="tg-modal-actions">
-          <button class="button button-light button-full" id="tg-modal-cart-btn">Добавить в корзину <span>＋</span></button>
-        </div>
+        <button id="tg-modal-cart-btn" class="button button-light button-full">Добавить в корзину <span>＋</span></button>
       </div>
     </div>
   </div>
 
-  <script src="app.js?v=42"></script>
+  <div class="toast" id="toast"></div>
+<script src="app.js?v=50"></script>
 </body>
 </html>
