@@ -99,39 +99,6 @@
     }
   },
   {
-    "id": "torch",
-    "name": "Chill Flame",
-    "number": "#28 962",
-    "model": "Lego",
-    "file": "assets/gifts/lego-60fps.webp",
-    "video": "assets/source/torch.mp4",
-    "previewIsVideo": true,
-    "sku": "#28 962",
-    "prices": {
-      "TON": 6,
-      "BYN": 20,
-      "STARS": 460
-    },
-    "subtitle": "Коллекционный подарок · модель Lego",
-    "description": "Chill Flame #28 962 — модель Lego. Детализированный факел с ярким пламенем и анимированным движением.",
-    "glow": "#45413e",
-    "reserved": false,
-    "traits": {
-      "model": {
-        "name": "Lego",
-        "chance": "3%"
-      },
-      "pattern": {
-        "name": "Nemes",
-        "chance": "0.4%"
-      },
-      "backdrop": {
-        "name": "Shamrock Green",
-        "chance": "1.5%"
-      }
-    }
-  },
-  {
     "id": "button",
     "name": "Input Key",
     "number": "#21 990",
