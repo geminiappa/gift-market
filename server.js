@@ -7,11 +7,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'n3yranftlox228';
 
-// GitHub Persistence (бесплатное вечное хранение на бесплатном тарифе Render!)
-// Достаточно указать в Render Environment Variables:
-// GITHUB_TOKEN = ваш Personal Access Token (с правами repo / contents:write)
-// GITHUB_REPO  = username/repo-name (например: geminiappa/gift-market)
-// GITHUB_BRANCH = main (по умолчанию main)
+// Настройки Telegram Бота (добавь BOT_TOKEN и SITE_URL в Render Environment Variables)
+const BOT_TOKEN = (process.env.BOT_TOKEN || '').trim();
+const SITE_URL = (process.env.SITE_URL || '').trim().replace(/\/$/, '');
+const ADMIN_CHAT_IDS = (process.env.ADMIN_CHAT_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+
+// GitHub Persistence
 const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || '').trim();
 const GITHUB_REPO = (process.env.GITHUB_REPO || '').trim();
 const GITHUB_BRANCH = (process.env.GITHUB_BRANCH || 'main').trim();
@@ -163,12 +164,7 @@ async function githubPutFile(relPath, bufferContent, commitMessage) {
     body: JSON.stringify(body)
   });
 
-  if (!putRes.ok) {
-    const txt = await putRes.text();
-    console.error('GitHub sync failed for', fullRepoPath, putRes.status, txt);
-    return false;
-  }
-  return true;
+  return putRes.ok;
 }
 
 async function githubFetchGifts() {
@@ -191,9 +187,7 @@ async function githubFetchGifts() {
       fs.writeFileSync(GIFTS_FILE, JSON.stringify(parsed, null, 2), 'utf8');
       return parsed;
     }
-  } catch (e) {
-    console.error('GitHub initial fetch error:', e.message);
-  }
+  } catch (e) {}
   return null;
 }
 
@@ -217,14 +211,6 @@ async function writeGifts(list, commitMsg = 'Update gifts catalog') {
   }
 }
 
-// Загружаем актуальную базу из GitHub при старте контейнера Render
-(async () => {
-  const remoteList = await githubFetchGifts();
-  if (!remoteList) {
-    readGifts();
-  }
-})();
-
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
@@ -241,13 +227,11 @@ const upload = multer({
 
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
-// Если файл в /uploads пропал после сна бесплатного контейнера Render — подтягиваем его напрямую из GitHub!
+
 app.get('/uploads/:filename', async (req, res) => {
   const safeFile = path.basename(req.params.filename);
   const localPath = path.join(UPLOADS_DIR, safeFile);
-  if (fs.existsSync(localPath)) {
-    return res.sendFile(localPath);
-  }
+  if (fs.existsSync(localPath)) return res.sendFile(localPath);
   if (GITHUB_TOKEN && GITHUB_REPO) {
     try {
       const fullRepoPath = ghRepoPath(`data/uploads/${safeFile}`);
@@ -260,23 +244,22 @@ app.get('/uploads/:filename', async (req, res) => {
         }
       });
       if (ghRes.ok) {
-        const arrBuf = await ghRes.arrayBuffer();
-        const buf = Buffer.from(arrBuf);
+        const buf = Buffer.from(await ghRes.arrayBuffer());
         fs.writeFileSync(localPath, buf);
         return res.sendFile(localPath);
       }
-    } catch (e) {
-      console.error('GitHub media restore error:', e.message);
-    }
+    } catch (e) {}
   }
   res.status(404).send('File not found');
 });
 
 app.use(express.static(__dirname));
 
+// Лёгкий роут для UptimeRobot (чтобы Render не засыпал)
+app.get('/ping', (req, res) => res.status(200).send('OK'));
+
 function checkAdmin(req, res, next) {
-  const pass = req.headers['x-admin-password'];
-  if (pass !== ADMIN_PASSWORD) {
+  if (req.headers['x-admin-password'] !== ADMIN_PASSWORD) {
     return res.status(401).json({ error: 'Неверный пароль администратора' });
   }
   next();
@@ -284,173 +267,128 @@ function checkAdmin(req, res, next) {
 
 app.post('/api/login', (req, res) => {
   const { password } = req.body || {};
-  if (password === ADMIN_PASSWORD) {
-    return res.json({ ok: true, persistentGithub: Boolean(GITHUB_TOKEN && GITHUB_REPO) });
-  }
+  if (password === ADMIN_PASSWORD) return res.json({ ok: true });
   return res.status(401).json({ error: 'Неверный пароль' });
 });
 
-app.get('/api/gifts', (req, res) => {
-  res.json(readGifts());
+app.get('/api/gifts', (req, res) => res.json(readGifts()));
+
+app.post('/api/gifts', checkAdmin, upload.fields([{ name: 'avatar', maxCount: 1 }, { name: 'preview', maxCount: 1 }]), async (req, res) => {
+  try {
+    const avatarFile = req.files?.avatar?.[0];
+    if (!avatarFile) return res.status(400).json({ error: 'Загрузите картинку или гифку подарка' });
+
+    if (GITHUB_TOKEN && GITHUB_REPO) {
+      await githubPutFile(`data/uploads/${avatarFile.filename}`, fs.readFileSync(avatarFile.path), `Upload avatar ${avatarFile.filename}`);
+    }
+    const previewFile = req.files?.preview?.[0];
+    if (previewFile && GITHUB_TOKEN && GITHUB_REPO) {
+      await githubPutFile(`data/uploads/${previewFile.filename}`, fs.readFileSync(previewFile.path), `Upload preview ${previewFile.filename}`);
+    }
+
+    const avatarUrl = `uploads/${avatarFile.filename}`;
+    const previewUrl = previewFile ? `uploads/${previewFile.filename}` : avatarUrl;
+    const previewIsVideo = previewFile ? previewFile.mimetype.startsWith('video/') : false;
+
+    const body = req.body || {};
+    const rawNum = (body.number || '#10 001').trim();
+    const number = rawNum.startsWith('#') ? rawNum : `#${rawNum}`;
+    const model = (body.model || 'Original').trim();
+
+    const newGift = {
+      id: 'gift_' + Date.now(),
+      name: (body.name || 'New Gift').trim(),
+      number,
+      model,
+      file: avatarUrl,
+      video: previewUrl,
+      previewIsVideo,
+      sku: number,
+      prices: { TON: Number(body.priceTon || 0), BYN: Number(body.priceByn || 0), STARS: Number(body.priceStars || 0) },
+      subtitle: `Коллекционный подарок · модель ${model}`,
+      description: (body.description || '').trim(),
+      glow: '#414448',
+      reserved: body.reserved === 'true',
+      traits: {
+        model: { name: model, chance: (body.modelChance || '1.5%').trim() },
+        pattern: { name: (body.pattern || 'Starlight').trim(), chance: (body.patternChance || '0.5%').trim() },
+        backdrop: { name: (body.backdrop || 'Onyx Dark').trim(), chance: (body.backdropChance || '1.5%').trim() }
+      }
+    };
+
+    const list = readGifts();
+    list.push(newGift);
+    await writeGifts(list, `Add gift ${newGift.name} ${newGift.number}`);
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Ошибка сохранения подарка' });
+  }
 });
 
-app.post(
-  '/api/gifts',
-  checkAdmin,
-  upload.fields([
-    { name: 'avatar', maxCount: 1 },
-    { name: 'preview', maxCount: 1 }
-  ]),
-  async (req, res) => {
-    try {
-      const avatarFile = req.files?.avatar?.[0];
-      if (!avatarFile) {
-        return res.status(400).json({ error: 'Загрузите картинку или гифку подарка' });
-      }
+app.put('/api/gifts/:id', checkAdmin, upload.fields([{ name: 'avatar', maxCount: 1 }, { name: 'preview', maxCount: 1 }]), async (req, res) => {
+  try {
+    const list = readGifts();
+    const idx = list.findIndex(g => g.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Подарок не найден' });
 
-      if (GITHUB_TOKEN && GITHUB_REPO) {
-        await githubPutFile(
-          `data/uploads/${avatarFile.filename}`,
-          fs.readFileSync(avatarFile.path),
-          `Upload gift avatar ${avatarFile.filename}`
-        );
-      }
+    const existing = list[idx];
+    const body = req.body || {};
+    const rawNum = (body.number || existing.number).trim();
+    const number = rawNum.startsWith('#') ? rawNum : `#${rawNum}`;
+    const model = (body.model || existing.model).trim();
 
-      const previewFile = req.files?.preview?.[0];
-      if (previewFile && GITHUB_TOKEN && GITHUB_REPO) {
-        await githubPutFile(
-          `data/uploads/${previewFile.filename}`,
-          fs.readFileSync(previewFile.path),
-          `Upload gift preview ${previewFile.filename}`
-        );
-      }
+    const avatarFile = req.files?.avatar?.[0];
+    const previewFile = req.files?.preview?.[0];
 
-      const avatarUrl = `uploads/${avatarFile.filename}`;
-      const previewUrl = previewFile ? `uploads/${previewFile.filename}` : avatarUrl;
-      const previewIsVideo = previewFile ? previewFile.mimetype.startsWith('video/') : false;
-
-      const body = req.body || {};
-      const rawNum = (body.number || '#10 001').trim();
-      const number = rawNum.startsWith('#') ? rawNum : `#${rawNum}`;
-      const model = (body.model || 'Original').trim();
-
-      const newGift = {
-        id: 'gift_' + Date.now(),
-        name: (body.name || 'New Gift').trim(),
-        number,
-        model,
-        file: avatarUrl,
-        video: previewUrl,
-        previewIsVideo,
-        sku: number,
-        prices: {
-          TON: Number(body.priceTon || 0),
-          BYN: Number(body.priceByn || 0),
-          STARS: Number(body.priceStars || 0)
-        },
-        subtitle: `Коллекционный подарок · модель ${model}`,
-        description: (body.description || '').trim(),
-        glow: '#414448',
-        reserved: body.reserved === 'true',
-        traits: {
-          model: { name: model, chance: (body.modelChance || '1.5%').trim() },
-          pattern: { name: (body.pattern || 'Starlight').trim(), chance: (body.patternChance || '0.5%').trim() },
-          backdrop: { name: (body.backdrop || 'Onyx Dark').trim(), chance: (body.backdropChance || '1.5%').trim() }
-        }
-      };
-
-      const list = readGifts();
-      list.push(newGift);
-      await writeGifts(list, `Add gift ${newGift.name} ${newGift.number}`);
-      res.json(list);
-    } catch (err) {
-      res.status(500).json({ error: err.message || 'Ошибка сохранения подарка' });
+    if (avatarFile && GITHUB_TOKEN && GITHUB_REPO) {
+      await githubPutFile(`data/uploads/${avatarFile.filename}`, fs.readFileSync(avatarFile.path), `Update avatar ${avatarFile.filename}`);
     }
-  }
-);
-
-app.put(
-  '/api/gifts/:id',
-  checkAdmin,
-  upload.fields([
-    { name: 'avatar', maxCount: 1 },
-    { name: 'preview', maxCount: 1 }
-  ]),
-  async (req, res) => {
-    try {
-      const list = readGifts();
-      const idx = list.findIndex(g => g.id === req.params.id);
-      if (idx === -1) {
-        return res.status(404).json({ error: 'Подарок не найден' });
-      }
-
-      const existing = list[idx];
-      const body = req.body || {};
-      const rawNum = (body.number || existing.number).trim();
-      const number = rawNum.startsWith('#') ? rawNum : `#${rawNum}`;
-      const model = (body.model || existing.model).trim();
-
-      const avatarFile = req.files?.avatar?.[0];
-      const previewFile = req.files?.preview?.[0];
-
-      if (avatarFile && GITHUB_TOKEN && GITHUB_REPO) {
-        await githubPutFile(
-          `data/uploads/${avatarFile.filename}`,
-          fs.readFileSync(avatarFile.path),
-          `Update gift avatar ${avatarFile.filename}`
-        );
-      }
-      if (previewFile && GITHUB_TOKEN && GITHUB_REPO) {
-        await githubPutFile(
-          `data/uploads/${previewFile.filename}`,
-          fs.readFileSync(previewFile.path),
-          `Update gift preview ${previewFile.filename}`
-        );
-      }
-
-      const fileUrl = avatarFile ? `uploads/${avatarFile.filename}` : existing.file;
-      let videoUrl = existing.video;
-      let previewIsVideo = existing.previewIsVideo;
-
-      if (previewFile) {
-        videoUrl = `uploads/${previewFile.filename}`;
-        previewIsVideo = previewFile.mimetype.startsWith('video/');
-      } else if (avatarFile && existing.video === existing.file) {
-        videoUrl = fileUrl;
-        previewIsVideo = false;
-      }
-
-      list[idx] = {
-        ...existing,
-        name: (body.name || existing.name).trim(),
-        number,
-        sku: number,
-        model,
-        file: fileUrl,
-        video: videoUrl,
-        previewIsVideo,
-        prices: {
-          TON: Number(body.priceTon ?? existing.prices.TON),
-          BYN: Number(body.priceByn ?? existing.prices.BYN),
-          STARS: Number(body.priceStars ?? existing.prices.STARS)
-        },
-        subtitle: `Коллекционный подарок · модель ${model}`,
-        description: (body.description ?? existing.description).trim(),
-        reserved: body.reserved === 'true',
-        traits: {
-          model: { name: model, chance: (body.modelChance || existing.traits.model.chance).trim() },
-          pattern: { name: (body.pattern || existing.traits.pattern.name).trim(), chance: (body.patternChance || existing.traits.pattern.chance).trim() },
-          backdrop: { name: (body.backdrop || existing.traits.backdrop.name).trim(), chance: (body.backdropChance || existing.traits.backdrop.chance).trim() }
-        }
-      };
-
-      await writeGifts(list, `Edit gift ${list[idx].name} ${list[idx].number}`);
-      res.json(list);
-    } catch (err) {
-      res.status(500).json({ error: err.message || 'Ошибка обновления подарка' });
+    if (previewFile && GITHUB_TOKEN && GITHUB_REPO) {
+      await githubPutFile(`data/uploads/${previewFile.filename}`, fs.readFileSync(previewFile.path), `Update preview ${previewFile.filename}`);
     }
+
+    const fileUrl = avatarFile ? `uploads/${avatarFile.filename}` : existing.file;
+    let videoUrl = existing.video;
+    let previewIsVideo = existing.previewIsVideo;
+
+    if (previewFile) {
+      videoUrl = `uploads/${previewFile.filename}`;
+      previewIsVideo = previewFile.mimetype.startsWith('video/');
+    } else if (avatarFile && existing.video === existing.file) {
+      videoUrl = fileUrl;
+      previewIsVideo = false;
+    }
+
+    list[idx] = {
+      ...existing,
+      name: (body.name || existing.name).trim(),
+      number,
+      sku: number,
+      model,
+      file: fileUrl,
+      video: videoUrl,
+      previewIsVideo,
+      prices: {
+        TON: Number(body.priceTon ?? existing.prices.TON),
+        BYN: Number(body.priceByn ?? existing.prices.BYN),
+        STARS: Number(body.priceStars ?? existing.prices.STARS)
+      },
+      subtitle: `Коллекционный подарок · модель ${model}`,
+      description: (body.description ?? existing.description).trim(),
+      reserved: body.reserved === 'true',
+      traits: {
+        model: { name: model, chance: (body.modelChance || existing.traits.model.chance).trim() },
+        pattern: { name: (body.pattern || existing.traits.pattern.name).trim(), chance: (body.patternChance || existing.traits.pattern.chance).trim() },
+        backdrop: { name: (body.backdrop || existing.traits.backdrop.name).trim(), chance: (body.backdropChance || existing.traits.backdrop.chance).trim() }
+      }
+    };
+
+    await writeGifts(list, `Edit gift ${list[idx].name} ${list[idx].number}`);
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Ошибка обновления подарка' });
   }
-);
+});
 
 app.patch('/api/gifts/:id/reserve', checkAdmin, async (req, res) => {
   const list = readGifts();
@@ -469,9 +407,174 @@ app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
   res.json(list);
 });
 
-app.listen(PORT, () => {
-  console.log(`GIFT MARKET server running on port ${PORT}`);
-  if (GITHUB_TOKEN && GITHUB_REPO) {
-    console.log(`GitHub persistent sync enabled -> ${GITHUB_REPO} (${GITHUB_BRANCH})`);
+/* ============================================================
+   TELEGRAM БОТ (Webhook на том же сервере Render без доп. оплаты)
+   ============================================================ */
+async function tgApi(method, payload) {
+  if (!BOT_TOKEN) return null;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return await res.json();
+  } catch (e) {
+    console.error('Telegram API error:', method, e.message);
+    return null;
+  }
+}
+
+function getMainMenuKeyboard() {
+  const rows = [];
+  if (SITE_URL) {
+    rows.push([{ text: 'Открыть GIFT MARKET (Mini App)', web_app: { url: SITE_URL } }]);
+  }
+  rows.push([{ text: 'Смотреть каталог подарков', callback_data: 'cat_0' }]);
+  rows.push([
+    { text: 'Админ @n3yura', url: 'https://t.me/n3yura' },
+    { text: 'Админ @NekosikN', url: 'https://t.me/NekosikN' }
+  ]);
+  return { inline_keyboard: rows };
+}
+
+function buildGiftCaption(g, index, total) {
+  const statusLine = g.reserved ? 'Статус: БРОНЬ' : 'Статус: В наличии (1 шт.)';
+  return [
+    `<b>${g.name}</b> <code>${g.number}</code>  [${index + 1}/${total}]`,
+    ``,
+    `• <b>Модель:</b> ${g.model} (${g.traits?.model?.chance || '—'})`,
+    `• <b>Узор:</b> ${g.traits?.pattern?.name || '—'} (${g.traits?.pattern?.chance || '—'})`,
+    `• <b>Фон:</b> ${g.traits?.backdrop?.name || '—'} (${g.traits?.backdrop?.chance || '—'})`,
+    ``,
+    `<b>Цена:</b> ${g.prices.TON} TON · ${g.prices.BYN} BYN · ${g.prices.STARS} STARS`,
+    `<b>${statusLine}</b>`,
+    ``,
+    g.description ? `<i>${g.description}</i>` : ''
+  ].filter(Boolean).join('\n');
+}
+
+function buildGiftKeyboard(g, index, total) {
+  const prevIdx = (index - 1 + total) % total;
+  const nextIdx = (index + 1) % total;
+  const orderText = encodeURIComponent(`Привет! Хочу купить: ${g.name} (${g.model} ${g.number}) — ${g.prices.TON} TON`);
+
+  const rows = [
+    [
+      { text: '◀ Назад', callback_data: `cat_${prevIdx}` },
+      { text: `${index + 1} / ${total}`, callback_data: 'noop' },
+      { text: 'Вперёд ▶', callback_data: `cat_${nextIdx}` }
+    ]
+  ];
+
+  if (!g.reserved) {
+    rows.push([
+      { text: 'Купить у @n3yura', url: `https://t.me/n3yura?text=${orderText}` },
+      { text: 'Купить у @NekosikN', url: `https://t.me/NekosikN?text=${orderText}` }
+    ]);
+  }
+
+  if (SITE_URL) {
+    rows.push([{ text: 'Открыть на сайте', web_app: { url: `${SITE_URL}/#gift/${g.id}` } }]);
+  }
+
+  rows.push([{ text: 'В главное меню', callback_data: 'menu' }]);
+  return { inline_keyboard: rows };
+}
+
+async function sendGiftCard(chatId, index, messageId = null) {
+  const list = readGifts();
+  if (!list.length) {
+    return tgApi('sendMessage', { chat_id: chatId, text: 'Каталог пока пуст.' });
+  }
+  const safeIdx = ((index % list.length) + list.length) % list.length;
+  const g = list[safeIdx];
+  const caption = buildGiftCaption(g, safeIdx, list.length);
+  const reply_markup = buildGiftKeyboard(g, safeIdx, list.length);
+
+  if (messageId) {
+    await tgApi('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: caption,
+      parse_mode: 'HTML',
+      reply_markup
+    });
+  } else {
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: caption,
+      parse_mode: 'HTML',
+      reply_markup
+    });
+  }
+}
+
+app.post('/telegram/webhook', async (req, res) => {
+  res.sendStatus(200);
+  if (!BOT_TOKEN) return;
+
+  const update = req.body || {};
+
+  if (update.message) {
+    const msg = update.message;
+    const chatId = msg.chat.id;
+    const text = (msg.text || '').trim();
+
+    if (text.startsWith('/start') || text.startsWith('/menu')) {
+      const count = readGifts().length;
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: `<b>GIFT MARKET</b> — магазин цифровых подарков Telegram.\n\nСейчас в каталоге: <b>${count}</b> поз.\nВалюты оплаты: <b>TON · BYN · Telegram Stars</b>\n\nВыбери действие ниже:`,
+        parse_mode: 'HTML',
+        reply_markup: getMainMenuKeyboard()
+      });
+    } else if (text.startsWith('/catalog')) {
+      await sendGiftCard(chatId, 0);
+    } else if (text.startsWith('/id')) {
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: `Твой Telegram ID: <code>${msg.from.id}</code>`,
+        parse_mode: 'HTML'
+      });
+    }
+  }
+
+  if (update.callback_query) {
+    const cb = update.callback_query;
+    const chatId = cb.message.chat.id;
+    const msgId = cb.message.message_id;
+    const data = cb.data || '';
+
+    await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
+
+    if (data === 'menu') {
+      const count = readGifts().length;
+      await tgApi('editMessageText', {
+        chat_id: chatId,
+        message_id: msgId,
+        text: `<b>GIFT MARKET</b> — магазин цифровых подарков Telegram.\n\nСейчас в каталоге: <b>${count}</b> поз.\nВалюты оплаты: <b>TON · BYN · Telegram Stars</b>\n\nВыбери действие ниже:`,
+        parse_mode: 'HTML',
+        reply_markup: getMainMenuKeyboard()
+      });
+    } else if (data.startsWith('cat_')) {
+      const idx = Number(data.replace('cat_', '')) || 0;
+      await sendGiftCard(chatId, idx, msgId);
+    }
   }
 });
+
+// Запуск сервера + авторегистрация Webhook в Telegram
+(async () => {
+  const remoteList = await githubFetchGifts();
+  if (!remoteList) readGifts();
+
+  app.listen(PORT, async () => {
+    console.log(`GIFT MARKET server running on port ${PORT}`);
+    if (BOT_TOKEN && SITE_URL) {
+      const hookUrl = `${SITE_URL}/telegram/webhook`;
+      const r = await tgApi('setWebhook', { url: hookUrl });
+      console.log('Telegram webhook set:', hookUrl, r?.ok);
+    }
+  });
+})();
