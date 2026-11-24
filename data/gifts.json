@@ -1,0 +1,200 @@
+[
+  {
+    "id": "kakashka",
+    "name": "Happy Brownie",
+    "number": "#200 024",
+    "model": "Deadpoo",
+    "file": "assets/gifts/deadpoo-60fps.webp",
+    "video": "assets/source/kakashka.mp4",
+    "previewIsVideo": true,
+    "sku": "#200 024",
+    "prices": {
+      "TON": 8,
+      "BYN": 27,
+      "STARS": 550
+    },
+    "subtitle": "Коллекционный подарок · модель Deadpoo",
+    "description": "Happy Brownie #200 024 — коллекционный подарок в модели Deadpoo. Анимированная фигурка с оригинальной отделкой и яркими деталями.",
+    "glow": "#424044",
+    "reserved": false,
+    "traits": {
+      "model": {
+        "name": "Deadpoo",
+        "chance": "2%"
+      },
+      "pattern": {
+        "name": "Pyramid",
+        "chance": "0.5%"
+      },
+      "backdrop": {
+        "name": "Battleship Grey",
+        "chance": "1%"
+      }
+    }
+  },
+  {
+    "id": "rabbit",
+    "name": "Pool Float",
+    "number": "#110 493",
+    "model": "Air Bunny",
+    "file": "assets/gifts/air-bunny-60fps.webp",
+    "video": "assets/source/rabbit.mp4",
+    "previewIsVideo": true,
+    "sku": "#110 493",
+    "prices": {
+      "TON": 8,
+      "BYN": 27,
+      "STARS": 550
+    },
+    "subtitle": "Коллекционный подарок · модель Air Bunny",
+    "description": "Pool Float #110 493 — модель Air Bunny. Белый надувной круг с кроликом и морковкой, представленный в виде оригинальной анимации.",
+    "glow": "#414448",
+    "reserved": false,
+    "traits": {
+      "model": {
+        "name": "Air Bunny",
+        "chance": "3%"
+      },
+      "pattern": {
+        "name": "Carrot",
+        "chance": "0.5%"
+      },
+      "backdrop": {
+        "name": "Sapphire",
+        "chance": "1.5%"
+      }
+    }
+  },
+  {
+    "id": "tank",
+    "name": "Pool Float",
+    "number": "#52 138",
+    "model": "Water Tank",
+    "file": "assets/gifts/water-tank-60fps.webp",
+    "video": "assets/source/tank.mp4",
+    "previewIsVideo": true,
+    "sku": "#52 138",
+    "prices": {
+      "TON": 8,
+      "BYN": 27,
+      "STARS": 550
+    },
+    "subtitle": "Коллекционный подарок · модель Water Tank",
+    "description": "Pool Float #52 138 — модель Water Tank. Необычный водный танк с утёнком и брызгами. Сейчас подарок находится в брони.",
+    "glow": "#3f4441",
+    "reserved": true,
+    "traits": {
+      "model": {
+        "name": "Water Tank",
+        "chance": "1.5%"
+      },
+      "pattern": {
+        "name": "Coffee Bean",
+        "chance": "0.2%"
+      },
+      "backdrop": {
+        "name": "Mint Green",
+        "chance": "1.5%"
+      }
+    }
+  },
+  {
+    "id": "torch",
+    "name": "Chill Flame",
+    "number": "#28 962",
+    "model": "Lego",
+    "file": "assets/gifts/lego-60fps.webp",
+    "video": "assets/source/torch.mp4",
+    "previewIsVideo": true,
+    "sku": "#28 962",
+    "prices": {
+      "TON": 6,
+      "BYN": 20,
+      "STARS": 460
+    },
+    "subtitle": "Коллекционный подарок · модель Lego",
+    "description": "Chill Flame #28 962 — модель Lego. Детализированный факел с ярким пламенем и анимированным движением.",
+    "glow": "#45413e",
+    "reserved": false,
+    "traits": {
+      "model": {
+        "name": "Lego",
+        "chance": "3%"
+      },
+      "pattern": {
+        "name": "Nemes",
+        "chance": "0.4%"
+      },
+      "backdrop": {
+        "name": "Shamrock Green",
+        "chance": "1.5%"
+      }
+    }
+  },
+  {
+    "id": "button",
+    "name": "Input Key",
+    "number": "#21 990",
+    "model": "Astrobot",
+    "file": "assets/gifts/astrobot-60fps.webp",
+    "video": "assets/source/button.mp4",
+    "previewIsVideo": true,
+    "sku": "#21 990",
+    "prices": {
+      "TON": 15,
+      "BYN": 50,
+      "STARS": 1150
+    },
+    "subtitle": "Коллекционный подарок · модель Astrobot",
+    "description": "Input Key #21 990 — модель Astrobot. Футуристичная клавиша с тёмным дисплеем и металлическим корпусом.",
+    "glow": "#3e4147",
+    "reserved": false,
+    "traits": {
+      "model": {
+        "name": "Astrobot",
+        "chance": "1.5%"
+      },
+      "pattern": {
+        "name": "Succubus",
+        "chance": "0.5%"
+      },
+      "backdrop": {
+        "name": "French Blue",
+        "chance": "1.5%"
+      }
+    }
+  },
+  {
+    "id": "gift_1795499732592",
+    "name": "tets",
+    "number": "#10 001",
+    "model": "ususus",
+    "file": "uploads/1795499729226_doz7f7.jpeg",
+    "video": "uploads/1795499729226_doz7f7.jpeg",
+    "previewIsVideo": false,
+    "sku": "#10 001",
+    "prices": {
+      "TON": 10,
+      "BYN": 35,
+      "STARS": 700
+    },
+    "subtitle": "Коллекционный подарок · модель ususus",
+    "description": "popa",
+    "glow": "#414448",
+    "reserved": false,
+    "traits": {
+      "model": {
+        "name": "ususus",
+        "chance": "1.5%"
+      },
+      "pattern": {
+        "name": "Starlight",
+        "chance": "0.5%"
+      },
+      "backdrop": {
+        "name": "Onyx Dark",
+        "chance": "1.5%"
+      }
+    }
+  }
+]
