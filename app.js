@@ -115,7 +115,6 @@ async function fetchServerGifts() {
       return true;
     }
   } catch (err) {
-    // Fallback если открыли index.html локально без node server.js
     const localSaved = localStorage.getItem('gmFallbackGifts');
     if (localSaved) {
       try { GIFTS = JSON.parse(localSaved); } catch (e) {}
@@ -175,6 +174,14 @@ function productCard(g, i) {
   </article>`;
 }
 
+function pluralGifts(n) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'оригинальный подарок';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'оригинальных подарка';
+  return 'оригинальных подарков';
+}
+
 function renderHome() {
   return `<section class="hero">
     <div class="hero-copy">
@@ -204,7 +211,7 @@ function renderHome() {
         <img class="gift-cutout hero-gift-cutout" src="assets/gifts/air-bunny-60fps.webp" alt="Pool Float Air Bunny">
         <span>THE GIFT COLLECTION</span>
       </div>
-      <div class="stage-index"><b>01</b> / 05 <span> ✓</span></div>
+      <div class="stage-index"><b>01</b> / ${String(GIFTS.length).padStart(2,'0')} <span> ✓</span></div>
     </div>
   </section>
   <section class="home-section">
@@ -218,7 +225,7 @@ function renderHome() {
     <div class="featured-grid">${GIFTS.slice(0, 3).map(productCard).join('')}</div>
   </section>
   <section class="benefit-strip">
-    <div class="benefit"><span class="benefit-icon">✓</span><div><b>Пять оригинальных подарков</b><p>Анимации из нашей коллекции без подмены изображениями.</p></div></div>
+    <div class="benefit"><span class="benefit-icon">✓</span><div><b>${GIFTS.length} ${pluralGifts(GIFTS.length)}</b><p>Оригинальные анимации из нашей коллекции в наличии и под заказ.</p></div></div>
     <div class="benefit"><span class="benefit-icon">✓</span><div><b>Три валюты на выбор</b><p>TON, BYN или Telegram Stars — цены указаны в карточках.</p></div></div>
     <div class="benefit"><span class="benefit-icon">✓</span><div><b>Удобный каталог</b><p>Подробная страница каждого подарка, редкие шансы и корзина.</p></div></div>
   </section>`;
@@ -257,55 +264,34 @@ function renderAbout() {
       <div class="eyebrow">ABOUT GIFT MARKET</div>
       <h1>О <span>магазине.</span></h1>
     </div>
-    <p>GIFT MARKET — концепция отдельного магазина цифровых подарков с собственным визуальным стилем.</p>
+    <p>GIFT MARKET — магазин цифровых коллекционных подарков Telegram в минималистичной эстетике.</p>
   </section>
   <section class="split-panel">
     <div>
-      <div class="eyebrow">OUR IDEA</div>
+      <div class="eyebrow">OUR COLLECTION</div>
       <h2>Меньше лишнего.<br><span>Больше впечатлений.</span></h2>
-      <p>Мы собрали небольшую коллекцию цифровых подарков и оформили её в спокойной серо-чёрной эстетике. У каждого товара есть собственная карточка, анимация и прозрачная цена в TON, BYN и Telegram Stars.</p>
+      <p>В каталоге собраны редкие цифровые подарки с уникальными моделями, фонами и узорами. Выбирай понравившийся экземпляр, смотри шансы редкости и оформляй покупку напрямую через администраторов в удобной валюте — TON, BYN или Telegram Stars.</p>
       <a class="button button-light" href="#catalog">Посмотреть подарки <span>↗</span></a>
     </div>
     <div class="split-visual"><img src="assets/logo.jpg" alt="GIFT MARKET" style="width:120px;height:120px;border-radius:24px;object-fit:cover;"></div>
   </section>
-  <div class="eyebrow">WHAT YOU GET</div>
+  <div class="eyebrow">ADVANTAGES</div>
   <div class="info-grid">
-    <article class="info-card"><span class="info-num">01 / COLLECTION</span><h3>Оригинальные анимации</h3><p>В каталоге используются пять оригинальных анимаций из коллекции.</p></article>
-    <article class="info-card"><span class="info-num">02 / CLEAR PRICES</span><h3>Понятные цены</h3><p>У каждого подарка отображаются три заданные цены без скрытого пересчёта.</p></article>
-    <article class="info-card"><span class="info-num">03 / EXPERIENCE</span><h3>Единый интерфейс</h3><p>Каталог, страницы товаров, корзина и справочные разделы выдержаны в одном стиле.</p></article>
+    <article class="info-card"><span class="info-num">01 / COLLECTION</span><h3>${GIFTS.length} ${pluralGifts(GIFTS.length)}</h3><p>Актуальная коллекция цифровых подарков с живыми анимациями и указанием редкости.</p></article>
+    <article class="info-card"><span class="info-num">02 / CLEAR PRICES</span><h3>Понятные цены</h3><p>Для каждого подарка сразу указана точная стоимость в TON, BYN и Telegram Stars.</p></article>
+    <article class="info-card"><span class="info-num">03 / FAST DEAL</span><h3>Прямая сделка</h3><p>Быстрое оформление и передача подарка напрямую через администраторов @n3yura и @NekosikN.</p></article>
   </div>`;
 }
 
-function renderPayment() {
-  return `<section class="page-intro">
-    <div>
-      <div class="eyebrow">PAYMENT INFORMATION</div>
-      <h1>Оплата <span>и цены.</span></h1>
-    </div>
-    <p>Выбирай валюту, в которой хочешь оформить заявку. Текущая версия сайта показывает цены и формирует демо-заказ.</p>
-  </section>
-  <div class="payment-list">
-    <article class="payment-card"><span class="payment-code">01 / CRYPTO</span><h3>TON</h3><p>Цены отображаются в TON. Для приёма реальных платежей потребуется подключить TON Connect и серверную проверку транзакций.</p><span class="status-pill">Оплата не подключена</span></article>
-    <article class="payment-card"><span class="payment-code">02 / LOCAL</span><h3>BYN</h3><p>Белорусские рубли указаны как отдельная цена товара. Приём платежей BYN требует подключения выбранного платёжного провайдера.</p><span class="status-pill">Оплата не подключена</span></article>
-    <article class="payment-card"><span class="payment-code">03 / TELEGRAM</span><h3>STARS</h3><p>Для реальной оплаты Telegram Stars нужно подключить Telegram-бота и обработку успешных платежей на сервере.</p><span class="status-pill">Оплата не подключена</span></article>
-  </div>
-  <div class="eyebrow">HOW TO ORDER</div>
-  <div class="info-grid">
-    <article class="info-card"><span class="info-num">STEP 01</span><h3>Выбери подарок</h3><p>Перейди в каталог и открой карточку нужного товара.</p></article>
-    <article class="info-card"><span class="info-num">STEP 02</span><h3>Добавь в корзину</h3><p>Укажи валюту заказа и собери нужный набор.</p></article>
-    <article class="info-card"><span class="info-num">STEP 03</span><h3>Оставь заявку</h3><p>Укажи контакт. В этой версии заявка сохраняется только локально в браузере.</p></article>
-  </div>
-  <div class="notice-box">Важно: в текущей сборке реальные списания и перевод средств не выполняются. Не отправляй деньги на адреса, указанные неизвестными лицами. Платёжные интеграции необходимо подключить и протестировать отдельно.</div>`;
-}
-
 function renderFaq() {
+  const namesList = GIFTS.map(g => `${g.name} (${g.model})`).join(', ');
   const items = [
-    ['Какие подарки есть в магазине?', 'В каталоге представлены Happy Brownie — Deadpoo, Pool Float — Air Bunny, Pool Float — Water Tank, Chill Flame — Lego и Input Key — Astrobot. Water Tank сейчас отмечен как «БРОНЬ».'],
-    ['В каких валютах указаны цены?', 'Для каждого подарка отображаются отдельные цены в TON, BYN и Telegram Stars.'],
-    ['Сколько штук можно купить?', 'Каждый коллекционный NFT-подарок представлен в единственном экземпляре (1 шт.). После нажатия «Оформить заказ» тебя перенаправит в «Контакты», где можно сразу написать админу @n3yura или @NekosikN.'],
-    ['Как происходит оплата?', 'Пока сайт работает в демонстрационном режиме: он формирует заявку, но не принимает реальные платежи.'],
+    ['Какие подарки сейчас в каталоге?', `Сейчас в магазине доступно ${GIFTS.length} позиций: ${namesList}.`],
+    ['В каких валютах указаны цены?', 'Для каждого подарка отображаются точные цены в TON, BYN и Telegram Stars.'],
+    ['Сколько штук можно купить?', 'Каждый коллекционный подарок представлен в единственном экземпляре (1 шт.). После нажатия «Оформить заказ» откроется раздел «Контакты», где можно сразу написать админу @n3yura или @NekosikN.'],
+    ['Как происходит покупка и передача?', 'Выбери подарок в каталоге, нажми «Оформить заказ» и напиши любому из администраторов в Telegram — сделка проводится напрямую.'],
     ['Где посмотреть сам подарок и шансы?', 'Нажми прямо на карточку подарка в каталоге — откроется превью в цвете с фоном, узором и процентами редкости из Telegram.'],
-    ['Сохраняется ли корзина?', 'Да, корзина и выбранная валюта сохраняются в локальном хранилище текущего браузера.']
+    ['Сохраняется ли корзина?', 'Да, выбранные подарки и валюта сохраняются в браузере.']
   ];
   return `<section class="page-intro">
     <div>
@@ -385,7 +371,6 @@ function renderContacts() {
     </section>
   </div>`;
 }
-
 
 let adminUnlocked = sessionStorage.getItem('gmAdminUnlocked') === '1';
 let editingGiftId = null;
@@ -635,7 +620,6 @@ function render() {
     home: renderHome,
     catalog: renderCatalog,
     about: renderAbout,
-    payment: renderPayment,
     faq: renderFaq,
     contacts: renderContacts,
     admin: renderAdmin
@@ -849,7 +833,6 @@ app.addEventListener('click', e => {
 });
 
 $('#cartItems').addEventListener('click', e => {
-  
   const rem = e.target.closest('[data-remove]');
   if (rem) {
     cart = cart.filter(x => x.id !== rem.dataset.remove);
@@ -887,8 +870,6 @@ app.addEventListener('click', e => {
   const faq = e.target.closest('.faq-question');
   if (faq) faq.parentElement.classList.toggle('open');
 });
-
-
 
 $('#openCart').addEventListener('click', openCart);
 $('#closeCart').addEventListener('click', closeCart);
@@ -940,7 +921,6 @@ window.addEventListener('keydown', e => {
     $('#mobileNav').classList.remove('show');
   }
 });
-
 
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
@@ -1191,7 +1171,6 @@ app.addEventListener('submit', async e => {
       return;
     }
   } catch (err) {
-    // Локальный режим без сервера
     if (val === 'n3yranftlox228') {
       adminUnlocked = true;
       sessionStorage.setItem('gmAdminUnlocked', '1');
@@ -1220,4 +1199,3 @@ renderCart();
     renderCart();
   }
 })();
-
