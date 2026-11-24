@@ -544,7 +544,7 @@ app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
 });
 
 /* ============================================================
-   TELEGRAM API ЧЕРЕЗ НАДЁЖНЫЙ IPv4 HTTPS + НОВЫЕ ФИЧИ БОТА
+   TELEGRAM API ЧЕРЕЗ НАДЁЖНЫЙ IPv4 HTTPS + ПОЛНЫЙ ФУНКЦИОНАЛ БОТА
    ============================================================ */
 function tgApi(method, payload) {
   if (!BOT_TOKEN) return Promise.resolve(null);
@@ -718,6 +718,15 @@ function resolveGiftLocalMedia(g) {
   return null;
 }
 
+function extractTelegramMediaFromMessage(msg) {
+  if (msg.animation) return { fileId: msg.animation.file_id, fallbackExt: '.mp4', tgType: 'animation' };
+  if (msg.video) return { fileId: msg.video.file_id, fallbackExt: '.mp4', tgType: 'video' };
+  if (msg.document) return { fileId: msg.document.file_id, fallbackExt: path.extname(msg.document.file_name || '') || '.webp', tgType: 'document' };
+  if (msg.photo && msg.photo.length) return { fileId: msg.photo[msg.photo.length - 1].file_id, fallbackExt: '.jpg', tgType: 'photo' };
+  if (msg.sticker) return { fileId: msg.sticker.file_id, fallbackExt: msg.sticker.is_video ? '.webm' : '.webp', tgType: 'document' };
+  return null;
+}
+
 const tgAdminAuth = new Set(ENV_ADMIN_IDS);
 const tgWizard = new Map();
 
@@ -747,7 +756,8 @@ function getAdminPanelKeyboard() {
   return {
     inline_keyboard: [
       [{ text: '＋ Добавить новый подарок', callback_data: 'adm_add' }],
-      [{ text: 'Управление подарками (Бронь / Удалить)', callback_data: 'adm_manage' }],
+      [{ text: 'Управление подарками (Цена / Медиа / Бронь / Удалить)', callback_data: 'adm_manage' }],
+      [{ text: 'Рассылка всем пользователям', callback_data: 'adm_broadcast' }],
       [{ text: 'Статистика бота', callback_data: 'adm_stats' }],
       [{ text: 'В главное меню', callback_data: 'menu' }]
     ]
@@ -844,6 +854,13 @@ async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null, pre
         parse_mode: 'HTML',
         reply_markup
       }, 'animation', localMedia);
+    } else if (ext === '.jpg' || ext === '.jpeg' || ext === '.png') {
+      sent = await tgSendMultipart('sendPhoto', {
+        chat_id: chatId,
+        caption,
+        parse_mode: 'HTML',
+        reply_markup
+      }, 'photo', localMedia);
     } else {
       sent = await tgSendMultipart('sendDocument', {
         chat_id: chatId,
@@ -874,7 +891,6 @@ async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null, pre
   }
 }
 
-/* === Уведомление строго для @yapp1kc, @NekosikN и @n3yura === */
 async function notifyAdmins(htmlText) {
   const state = readBotState();
   const recipients = Array.from(new Set(state.adminIds));
@@ -887,7 +903,6 @@ async function notifyAdmins(htmlText) {
   }
 }
 
-/* === Авторассылка подписчикам при появлении нового подарка === */
 async function broadcastNewGiftToSubscribers(gift, giftIndex, excludeChatId = null) {
   const state = readBotState();
   if (!state.subscribers.length) return 0;
@@ -941,16 +956,25 @@ async function sendAdminManageList(chatId, oldMessageId = null) {
     tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
   }
   const list = readGifts();
-  const rows = list.map((g, idx) => ([
-    { text: `${g.reserved ? '[БРОНЬ]' : '[В НАЛ]'} ${g.name} ${g.number}`, callback_data: `adm_tog_${idx}` },
-    { text: 'Удалить', callback_data: `adm_del_${idx}` }
-  ]));
+  const rows = [];
+
+  list.forEach((g, idx) => {
+    rows.push([
+      { text: `${g.reserved ? '[БРОНЬ]' : '[В НАЛ]'} ${g.name} ${g.number} (${g.prices.TON} TON)`, callback_data: `adm_tog_${idx}` }
+    ]);
+    rows.push([
+      { text: 'Изменить цену', callback_data: `adm_price_${idx}` },
+      { text: 'Сменить медиа', callback_data: `adm_media_${idx}` },
+      { text: 'Удалить', callback_data: `adm_del_${idx}` }
+    ]);
+  });
+
   rows.push([{ text: '＋ Добавить подарок', callback_data: 'adm_add' }]);
   rows.push([{ text: 'Назад в панель', callback_data: 'adm_panel' }]);
 
   await tgApi('sendMessage', {
     chat_id: chatId,
-    text: `<b>Управление каталогом (${list.length} поз.)</b>\nНажми на название подарка, чтобы переключить «Бронь», или на «Удалить»:`,
+    text: `<b>Управление каталогом (${list.length} поз.)</b>\n• Нажми на название подарка, чтобы переключить <b>Бронь</b>\n• Используй кнопки ниже подарка для смены <b>Цены</b>, <b>Медиа</b> или <b>Удаления</b>:`,
     parse_mode: 'HTML',
     reply_markup: { inline_keyboard: rows }
   });
@@ -999,6 +1023,71 @@ async function sendAdminStats(chatId, oldMessageId = null) {
   });
 }
 
+/* === Обработка инлайн-режима (@giftmarket_by_bot ... в любом чате) === */
+async function handleInlineQuery(iq) {
+  const queryText = (iq.query || '').trim().toLowerCase();
+  const list = readGifts();
+
+  const filtered = queryText
+    ? list.filter(g => {
+        const hay = `${g.name} ${g.model} ${g.number} ${g.traits?.pattern?.name || ''} ${g.traits?.backdrop?.name || ''}`.toLowerCase();
+        return hay.includes(queryText);
+      })
+    : list;
+
+  const results = filtered.slice(0, 25).map((g, idx) => {
+    const orderText = encodeURIComponent(`Привет! Хочу купить: ${g.name} (${g.model} ${g.number}) — ${g.prices.TON} TON`);
+    const rows = [];
+    if (!g.reserved) {
+      rows.push([
+        { text: 'Купить у @n3yura', url: `https://t.me/n3yura?text=${orderText}` },
+        { text: 'Купить у @NekosikN', url: `https://t.me/NekosikN?text=${orderText}` }
+      ]);
+    }
+    if (SITE_URL) {
+      rows.push([{ text: 'Открыть на сайте', url: `${SITE_URL}/?gift=${encodeURIComponent(g.id)}` }]);
+    }
+
+    const messageText = buildGiftCaption(g, idx, list.length, '<b>GIFT MARKET</b>\n');
+    const relMedia = (g.video || g.file || '').replace(/^\//, '');
+    const publicMediaUrl = SITE_URL && relMedia ? `${SITE_URL}/${relMedia}` : '';
+    const isMp4 = /\.mp4(\?.*)?$/i.test(publicMediaUrl);
+
+    if (publicMediaUrl && isMp4) {
+      return {
+        type: 'mpeg4_gif',
+        id: `inl_${g.id}_${idx}`,
+        mpeg4_url: publicMediaUrl,
+        thumb_url: publicMediaUrl,
+        title: `${g.name} · ${g.model} ${g.number}`,
+        caption: messageText,
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: rows }
+      };
+    }
+
+    return {
+      type: 'article',
+      id: `inl_${g.id}_${idx}`,
+      title: `${g.name} · ${g.model} ${g.number}${g.reserved ? ' [БРОНЬ]' : ''}`,
+      description: `${g.prices.TON} TON · ${g.prices.BYN} BYN · ${g.prices.STARS} STARS`,
+      thumb_url: SITE_URL ? `${SITE_URL}/assets/logo.jpg` : undefined,
+      input_message_content: {
+        message_text: messageText,
+        parse_mode: 'HTML'
+      },
+      reply_markup: { inline_keyboard: rows }
+    };
+  });
+
+  await tgApi('answerInlineQuery', {
+    inline_query_id: iq.id,
+    results,
+    cache_time: 5,
+    is_personal: false
+  });
+}
+
 async function handleWizardInput(chatId, msg) {
   const state = tgWizard.get(chatId);
   if (!state) return false;
@@ -1008,7 +1097,7 @@ async function handleWizardInput(chatId, msg) {
     tgWizard.delete(chatId);
     await tgApi('sendMessage', {
       chat_id: chatId,
-      text: 'Добавление подарка отменено.',
+      text: 'Действие отменено.',
       reply_markup: getAdminPanelKeyboard()
     });
     return true;
@@ -1044,6 +1133,148 @@ async function handleWizardInput(chatId, msg) {
     return true;
   }
 
+  // Редактирование цены существующего подарка
+  if (state.step === 'edit_price') {
+    const nums = text.replace(/,/g, '.').split(/\s+/).map(Number).filter(n => !Number.isNaN(n));
+    if (nums.length < 3) {
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Введи 3 числа через пробел: <b>TON BYN STARS</b> (например: <code>7 24 500</code>):',
+        parse_mode: 'HTML',
+        reply_markup: cancelKb
+      });
+      return true;
+    }
+
+    const list = readGifts();
+    const g = list[state.data.giftIdx];
+    if (!g) {
+      tgWizard.delete(chatId);
+      await tgApi('sendMessage', { chat_id: chatId, text: 'Подарок не найден.', reply_markup: getAdminPanelKeyboard() });
+      return true;
+    }
+
+    g.prices.TON = nums[0];
+    g.prices.BYN = nums[1];
+    g.prices.STARS = Math.round(nums[2]);
+    await writeGifts(list, `Update price via TG bot: ${g.name} ${g.number}`);
+    tgWizard.delete(chatId);
+
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: `<b>Цена обновлена в боте и на сайте!</b>\n${g.name} (${g.model}) ${g.number}: <b>${g.prices.TON} TON · ${g.prices.BYN} BYN · ${g.prices.STARS} STARS</b>`,
+      parse_mode: 'HTML',
+      reply_markup: getAdminPanelKeyboard()
+    });
+    return true;
+  }
+
+  // Смена фото/видео/гифки существующего подарка
+  if (state.step === 'edit_media') {
+    const mediaInfo = extractTelegramMediaFromMessage(msg);
+    if (!mediaInfo) {
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Отправь новую <b>гифку, видео (.mp4) или картинку</b> подарка:',
+        parse_mode: 'HTML',
+        reply_markup: cancelKb
+      });
+      return true;
+    }
+
+    const list = readGifts();
+    const g = list[state.data.giftIdx];
+    if (!g) {
+      tgWizard.delete(chatId);
+      await tgApi('sendMessage', { chat_id: chatId, text: 'Подарок не найден.', reply_markup: getAdminPanelKeyboard() });
+      return true;
+    }
+
+    await tgApi('sendMessage', { chat_id: chatId, text: 'Загружаю новое медиа на сайт и в бота...' });
+
+    try {
+      const savedMedia = await downloadTelegramFile(mediaInfo.fileId, mediaInfo.fallbackExt);
+      g.file = savedMedia.relUrl;
+      g.video = savedMedia.relUrl;
+      g.previewIsVideo = savedMedia.isVideo;
+      await writeGifts(list, `Update media via TG bot: ${g.name} ${g.number}`);
+      tgWizard.delete(chatId);
+
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: `<b>Медиа подарка ${g.name} ${g.number} успешно обновлено!</b>`,
+        parse_mode: 'HTML',
+        reply_markup: getAdminPanelKeyboard()
+      });
+    } catch (err) {
+      tgWizard.delete(chatId);
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: `Ошибка обновления медиа: ${err.message}`,
+        reply_markup: getAdminPanelKeyboard()
+      });
+    }
+    return true;
+  }
+
+  // Массовая рассылка всем пользователям бота
+  if (state.step === 'broadcast') {
+    const botState = readBotState();
+    const users = botState.users || [];
+    if (!users.length) {
+      tgWizard.delete(chatId);
+      await tgApi('sendMessage', { chat_id: chatId, text: 'В базе пока нет пользователей для рассылки.', reply_markup: getAdminPanelKeyboard() });
+      return true;
+    }
+
+    const captionText = (msg.caption || msg.text || '').trim();
+    const mediaInfo = extractTelegramMediaFromMessage(msg);
+
+    if (!captionText && !mediaInfo) {
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Отправь текст объявления или картинку/гифку/видео с подписью:',
+        reply_markup: cancelKb
+      });
+      return true;
+    }
+
+    tgWizard.delete(chatId);
+    await tgApi('sendMessage', { chat_id: chatId, text: `Начинаю рассылку по <b>${users.length}</b> пользователям...`, parse_mode: 'HTML' });
+
+    let sentOk = 0;
+    let sentFail = 0;
+
+    for (const targetId of users) {
+      let r = null;
+      if (mediaInfo) {
+        if (mediaInfo.tgType === 'animation') {
+          r = await tgApi('sendAnimation', { chat_id: targetId, animation: mediaInfo.fileId, caption: captionText || undefined, parse_mode: 'HTML' });
+        } else if (mediaInfo.tgType === 'video') {
+          r = await tgApi('sendVideo', { chat_id: targetId, video: mediaInfo.fileId, caption: captionText || undefined, parse_mode: 'HTML' });
+        } else if (mediaInfo.tgType === 'photo') {
+          r = await tgApi('sendPhoto', { chat_id: targetId, photo: mediaInfo.fileId, caption: captionText || undefined, parse_mode: 'HTML' });
+        } else {
+          r = await tgApi('sendDocument', { chat_id: targetId, document: mediaInfo.fileId, caption: captionText || undefined, parse_mode: 'HTML' });
+        }
+      } else {
+        r = await tgApi('sendMessage', { chat_id: targetId, text: captionText, parse_mode: 'HTML' });
+      }
+
+      if (r && r.ok) sentOk++;
+      else sentFail++;
+    }
+
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: `<b>Рассылка завершена!</b>\n• Доставлено: <b>${sentOk}</b>\n• Не доставлено (заблокировали бота): <b>${sentFail}</b>`,
+      parse_mode: 'HTML',
+      reply_markup: getAdminPanelKeyboard()
+    });
+    return true;
+  }
+
+  // Пошаговое добавление нового подарка
   if (state.step === 'name') {
     if (!text) return true;
     state.data.name = text;
@@ -1154,27 +1385,8 @@ async function handleWizardInput(chatId, msg) {
   }
 
   if (state.step === 'media') {
-    let fileId = null;
-    let fallbackExt = '.mp4';
-
-    if (msg.animation) {
-      fileId = msg.animation.file_id;
-      fallbackExt = '.mp4';
-    } else if (msg.video) {
-      fileId = msg.video.file_id;
-      fallbackExt = '.mp4';
-    } else if (msg.document) {
-      fileId = msg.document.file_id;
-      fallbackExt = path.extname(msg.document.file_name || '') || '.webp';
-    } else if (msg.photo && msg.photo.length) {
-      fileId = msg.photo[msg.photo.length - 1].file_id;
-      fallbackExt = '.jpg';
-    } else if (msg.sticker) {
-      fileId = msg.sticker.file_id;
-      fallbackExt = msg.sticker.is_video ? '.webm' : '.webp';
-    }
-
-    if (!fileId) {
+    const mediaInfo = extractTelegramMediaFromMessage(msg);
+    if (!mediaInfo) {
       await tgApi('sendMessage', {
         chat_id: chatId,
         text: 'Пришли именно гифку, видео, картинку или файл подарка:',
@@ -1186,7 +1398,7 @@ async function handleWizardInput(chatId, msg) {
     await tgApi('sendMessage', { chat_id: chatId, text: 'Сохраняю подарок и отправляю уведомление подписчикам...' });
 
     try {
-      const savedMedia = await downloadTelegramFile(fileId, fallbackExt);
+      const savedMedia = await downloadTelegramFile(mediaInfo.fileId, mediaInfo.fallbackExt);
       const list = readGifts();
       const slugId = generateGiftSlug(state.data.model, state.data.name, list);
 
@@ -1248,6 +1460,12 @@ app.post('/telegram/webhook', async (req, res) => {
 
   const update = req.body || {};
 
+  // Обработка инлайн-запросов (@giftmarket_by_bot ... в любом чате)
+  if (update.inline_query) {
+    await handleInlineQuery(update.inline_query);
+    return;
+  }
+
   if (update.message) {
     const msg = update.message;
     const chatId = msg.chat.id;
@@ -1306,7 +1524,6 @@ app.post('/telegram/webhook', async (req, res) => {
 
     trackBotUser(chatId, fromUser.username);
 
-    // 1. Подписка / отписка на завоз новинок
     if (data === 'toggle_sub') {
       const state = readBotState();
       const idx = state.subscribers.indexOf(chatId);
@@ -1335,7 +1552,6 @@ app.post('/telegram/webhook', async (req, res) => {
       return;
     }
 
-    // 2. Бронь на 15 минут покупателем
     if (data.startsWith('res15_')) {
       const idx = Number(data.replace('res15_', ''));
       const list = readGifts();
@@ -1373,7 +1589,6 @@ app.post('/telegram/webhook', async (req, res) => {
       return;
     }
 
-    // 3. Нажатие кнопок «Купить у @n3yura» / «Купить у @NekosikN»
     if (data.startsWith('buy_n3_') || data.startsWith('buy_nk_')) {
       const isN3 = data.startsWith('buy_n3_');
       const idx = Number(data.replace(isN3 ? 'buy_n3_' : 'buy_nk_', ''));
@@ -1447,6 +1662,8 @@ app.post('/telegram/webhook', async (req, res) => {
       }
       tgAdminAuth.add(chatId);
 
+      const cancelKb = { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] };
+
       if (data === 'adm_panel') {
         tgWizard.delete(chatId);
         await tgApi('sendMessage', {
@@ -1461,12 +1678,44 @@ app.post('/telegram/webhook', async (req, res) => {
           chat_id: chatId,
           text: 'Шаг 1/8. Введи <b>название подарка</b> (например: <code>Crystal Skull</code>):',
           parse_mode: 'HTML',
-          reply_markup: { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] }
+          reply_markup: cancelKb
+        });
+      } else if (data === 'adm_broadcast') {
+        tgWizard.set(chatId, { step: 'broadcast', data: {} });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: '<b>Массовая рассылка всем пользователям бота</b>\n\nОтправь текст объявления или фото/гифку/видео с подписью (поддерживается HTML-разметка):',
+          parse_mode: 'HTML',
+          reply_markup: cancelKb
         });
       } else if (data === 'adm_manage') {
         await sendAdminManageList(chatId, msgId);
       } else if (data === 'adm_stats') {
         await sendAdminStats(chatId, msgId);
+      } else if (data.startsWith('adm_price_')) {
+        const idx = Number(data.replace('adm_price_', ''));
+        const list = readGifts();
+        const g = list[idx];
+        if (!g) return;
+        tgWizard.set(chatId, { step: 'edit_price', data: { giftIdx: idx } });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: `Изменение цены для <b>${g.name} (${g.model}) ${g.number}</b>.\nТекущая цена: <code>${g.prices.TON} ${g.prices.BYN} ${g.prices.STARS}</code>\n\nВведи новую цену тремя числами через пробел (<code>TON BYN STARS</code>), например: <code>7 24 500</code>:`,
+          parse_mode: 'HTML',
+          reply_markup: cancelKb
+        });
+      } else if (data.startsWith('adm_media_')) {
+        const idx = Number(data.replace('adm_media_', ''));
+        const list = readGifts();
+        const g = list[idx];
+        if (!g) return;
+        tgWizard.set(chatId, { step: 'edit_media', data: { giftIdx: idx } });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: `Смена гифки/видео/фото для <b>${g.name} (${g.model}) ${g.number}</b>.\n\nОтправь новую гифку, видео (.mp4) или картинку:`,
+          parse_mode: 'HTML',
+          reply_markup: cancelKb
+        });
       } else if (data.startsWith('adm_tog_')) {
         const idx = Number(data.replace('adm_tog_', ''));
         const list = readGifts();
