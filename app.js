@@ -101,10 +101,9 @@ const DEFAULT_GIFTS = [
   }
 ];
 
-let CUSTOM_GIFTS = [];
 let GIFTS = [...DEFAULT_GIFTS];
+let giftsLoadedFromServer = false;
 
-/* === Синхронизация каталога с сервером Render (видят все пользователи) === */
 async function fetchServerGifts() {
   try {
     const res = await fetch('/api/gifts', { cache: 'no-store' });
@@ -112,6 +111,7 @@ async function fetchServerGifts() {
     const data = await res.json();
     if (Array.isArray(data) && data.length > 0) {
       GIFTS = data;
+      giftsLoadedFromServer = true;
       return true;
     }
   } catch (err) {
@@ -120,6 +120,7 @@ async function fetchServerGifts() {
       try { GIFTS = JSON.parse(localSaved); } catch (e) {}
     }
   }
+  giftsLoadedFromServer = true;
   return false;
 }
 
@@ -136,7 +137,11 @@ let toastTimer;
 
 const money = (amount, code) => `${amount.toLocaleString('en-US')} ${code}`;
 const saveCart = () => localStorage.setItem('giftMarketCart', JSON.stringify(cart));
-const getGift = id => GIFTS.find(g => g.id === id);
+const getGift = id => {
+  if (!id) return null;
+  const cleanId = decodeURIComponent(String(id)).trim();
+  return GIFTS.find(g => String(g.id) === cleanId || String(g.sku) === cleanId);
+};
 
 cart = cart.filter(line => {
   const g = getGift(line.id);
@@ -572,6 +577,9 @@ function renderAdmin() {
 function renderGift(id) {
   const g = getGift(id);
   if (!g) {
+    if (!giftsLoadedFromServer) {
+      return `<section class="page-intro"><div><div class="eyebrow">LOADING</div><h1>Загрузка <span>подарка...</span></h1></div></section>`;
+    }
     return `<section class="page-intro"><div><div class="eyebrow">NOT FOUND</div><h1>Подарок <span>не найден.</span></h1></div><a class="button button-dark" href="#catalog">Вернуться в каталог</a></section>`;
   }
   return `<section class="product-detail">
@@ -609,8 +617,13 @@ function renderGift(id) {
 }
 
 function currentRoute() {
+  const params = new URLSearchParams(location.search);
+  const queryGift = params.get('gift');
+  if (queryGift && !location.hash) {
+    return { page: 'gift', id: queryGift };
+  }
   const hash = location.hash.replace(/^#/, '') || 'home';
-  if (hash.startsWith('gift/')) return { page: 'gift', id: hash.split('/')[1] };
+  if (hash.startsWith('gift/')) return { page: 'gift', id: hash.slice(5) };
   return { page: hash };
 }
 
@@ -738,7 +751,6 @@ function openCheckout() {
   }
 }
 
-/* === Telegram NFT Card Viewer с видео (без дублирующих надписей) === */
 function openTgGiftModal(giftId) {
   const g = getGift(giftId);
   if (!g) return;
@@ -931,7 +943,6 @@ function readFileAsDataURL(file) {
   });
 }
 
-// Живой предпросмотр в конструкторе подарков
 app.addEventListener('input', e => {
   if (!e.target.closest('#addGiftForm')) return;
   const name = $('#gfName')?.value.trim() || 'Новый подарок';
@@ -957,14 +968,11 @@ app.addEventListener('change', async e => {
   }
 });
 
-// Сохранение нового или отредактированного подарка на сервер
 app.addEventListener('submit', async e => {
   if (e.target.id !== 'addGiftForm') return;
   e.preventDefault();
 
   const isEditing = Boolean(editingGiftId);
-  const existingGift = isEditing ? getGift(editingGiftId) : null;
-
   const avatarInput = $('#gfAvatarFile');
   if (!isEditing && !avatarInput.files[0]) {
     showToast('Выбери картинку или гифку подарка');
@@ -1006,13 +1014,9 @@ app.addEventListener('submit', async e => {
     fd.append('reserved', String(reserved));
     fd.append('description', description);
 
-    if (avatarInput.files[0]) {
-      fd.append('avatar', avatarInput.files[0]);
-    }
+    if (avatarInput.files[0]) fd.append('avatar', avatarInput.files[0]);
     const previewInput = $('#gfPreviewFile');
-    if (previewInput.files[0]) {
-      fd.append('preview', previewInput.files[0]);
-    }
+    if (previewInput.files[0]) fd.append('preview', previewInput.files[0]);
 
     const url = isEditing ? `/api/gifts/${encodeURIComponent(editingGiftId)}` : '/api/gifts';
     const method = isEditing ? 'PUT' : 'POST';
@@ -1052,7 +1056,6 @@ app.addEventListener('submit', async e => {
   }
 });
 
-// Управление подарками (Выход / Редактирование / Бронь / Удаление / Экспорт)
 app.addEventListener('click', async e => {
   if (e.target.closest('#adminLogoutBtn')) {
     adminUnlocked = false;
@@ -1135,7 +1138,6 @@ app.addEventListener('click', async e => {
   }
 });
 
-// Секретный вход: 5 кликов по "© 2026 GIFT MARKET" в самом низу сайта
 let secretClicks = 0;
 let secretTimer;
 const secretTrigger = document.getElementById('secretAdminTrigger');
@@ -1151,7 +1153,6 @@ if (secretTrigger) {
   });
 }
 
-// Проверка пароля при входе в админку
 app.addEventListener('submit', async e => {
   if (e.target.id !== 'adminLoginForm') return;
   e.preventDefault();
@@ -1188,14 +1189,12 @@ render();
 renderCart();
 
 (async function syncGiftsFromServerOnStart() {
-  const ok = await fetchServerGifts();
-  if (ok) {
-    cart = cart.filter(line => {
-      const g = getGift(line.id);
-      return g && !g.reserved;
-    });
-    saveCart();
-    render();
-    renderCart();
-  }
+  await fetchServerGifts();
+  cart = cart.filter(line => {
+    const g = getGift(line.id);
+    return g && !g.reserved;
+  });
+  saveCart();
+  render();
+  renderCart();
 })();
