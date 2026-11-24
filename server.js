@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'n3yranftlox228';
 
-// Настройки Telegram Бота (Render автоматически подставляет RENDER_EXTERNAL_URL, если SITE_URL не задан)
+// Настройки Telegram Бота
 const BOT_TOKEN = (process.env.BOT_TOKEN || '').trim();
 const SITE_URL = (process.env.SITE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
 
@@ -211,6 +211,19 @@ async function writeGifts(list, commitMsg = 'Update gifts catalog') {
   }
 }
 
+function generateGiftSlug(model, name, existingList) {
+  const baseSlug = (model || name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'gift';
+  let slugId = baseSlug;
+  let counter = 2;
+  while (existingList.some(item => item.id === slugId)) {
+    slugId = `${baseSlug}-${counter++}`;
+  }
+  return slugId;
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
@@ -294,17 +307,8 @@ app.post('/api/gifts', checkAdmin, upload.fields([{ name: 'avatar', maxCount: 1 
     const model = (body.model || 'Original').trim();
     const name = (body.name || 'New Gift').trim();
 
-    // Генерируем красивый читаемый id (как 'rabbit', 'deadpoo', 'air-bunny')
-    const baseSlug = (model || name)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') || 'gift';
     const list = readGifts();
-    let slugId = baseSlug;
-    let counter = 2;
-    while (list.some(item => item.id === slugId)) {
-      slugId = `${baseSlug}-${counter++}`;
-    }
+    const slugId = generateGiftSlug(model, name, list);
 
     const newGift = {
       id: slugId,
@@ -418,7 +422,7 @@ app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
 });
 
 /* ============================================================
-   TELEGRAM API ЧЕРЕЗ НАДЁЖНЫЙ IPv4 HTTPS (БЕЗ FETCH FAILED НА RENDER)
+   TELEGRAM API ЧЕРЕЗ НАДЁЖНЫЙ IPv4 HTTPS + АДМИНКА В БОТЕ
    ============================================================ */
 function tgApi(method, payload) {
   if (!BOT_TOKEN) return Promise.resolve(null);
@@ -430,7 +434,7 @@ function tgApi(method, payload) {
         port: 443,
         path: `/bot${BOT_TOKEN}/${method}`,
         method: 'POST',
-        family: 4, // принудительно IPv4, чтобы Render не выдавал fetch failed
+        family: 4,
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(bodyStr)
@@ -540,6 +544,47 @@ function tgSendMultipart(method, fields, fileField, localFilePath) {
   });
 }
 
+// Скачивает файл из Telegram по file_id в папку data/uploads/ и пушит в GitHub
+async function downloadTelegramFile(fileId, fallbackExt = '.mp4') {
+  const fileInfo = await tgApi('getFile', { file_id: fileId });
+  if (!fileInfo || !fileInfo.ok || !fileInfo.result?.file_path) {
+    throw new Error('Не удалось получить файл из Telegram');
+  }
+  const tgFilePath = fileInfo.result.file_path;
+  const ext = path.extname(tgFilePath).toLowerCase() || fallbackExt;
+  const savedName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+  const destPath = path.join(UPLOADS_DIR, savedName);
+
+  const buf = await new Promise((resolve, reject) => {
+    https.get(
+      {
+        hostname: 'api.telegram.org',
+        port: 443,
+        path: `/file/bot${BOT_TOKEN}/${tgFilePath}`,
+        family: 4
+      },
+      res => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`HTTP ${res.statusCode} при скачивании файла`));
+        }
+        const chunks = [];
+        res.on('data', c => chunks.push(c));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      }
+    ).on('error', reject);
+  });
+
+  fs.writeFileSync(destPath, buf);
+  if (GITHUB_TOKEN && GITHUB_REPO) {
+    await githubPutFile(`data/uploads/${savedName}`, buf, `Upload gift media from TG bot ${savedName}`);
+  }
+
+  return {
+    relUrl: `uploads/${savedName}`,
+    isVideo: ext === '.mp4' || ext === '.webm' || ext === '.mov'
+  };
+}
+
 function resolveGiftLocalMedia(g) {
   const relMedia = (g.video || g.file || '').replace(/^\//, '');
   if (!relMedia) return null;
@@ -552,17 +597,34 @@ function resolveGiftLocalMedia(g) {
   return null;
 }
 
-function getMainMenuKeyboard() {
+// Состояние админки в Telegram (по chatId)
+const tgAdminAuth = new Set(); // авторизованные chatId
+const tgWizard = new Map(); // chatId -> { step, data }
+
+function getMainMenuKeyboard(chatId) {
   const rows = [];
   if (SITE_URL) {
-    rows.push([{ text: 'Открыть GIFT MARKET', web_app: { url: SITE_URL } }]);
+    rows.push([{ text: 'Открыть GIFT MARKET (Mini App)', web_app: { url: SITE_URL } }]);
   }
   rows.push([{ text: 'Каталог подарков', callback_data: 'cat_0' }]);
   rows.push([
     { text: 'Админ @n3yura', url: 'https://t.me/n3yura' },
     { text: 'Админ @NekosikN', url: 'https://t.me/NekosikN' }
   ]);
+  if (tgAdminAuth.has(chatId)) {
+    rows.push([{ text: 'Панель админа (Добавить / Удалить)', callback_data: 'adm_panel' }]);
+  }
   return { inline_keyboard: rows };
+}
+
+function getAdminPanelKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: '＋ Добавить новый подарок', callback_data: 'adm_add' }],
+      [{ text: 'Управление подарками (Бронь / Удалить)', callback_data: 'adm_manage' }],
+      [{ text: 'В главное меню', callback_data: 'menu' }]
+    ]
+  };
 }
 
 function buildGiftCaption(g, index, total) {
@@ -674,7 +736,7 @@ async function sendMainMenu(chatId, oldMessageId = null) {
   }
   const count = readGifts().length;
   const text = `<b>GIFT MARKET</b> — магазин цифровых подарков Telegram.\n\nСейчас в каталоге: <b>${count}</b> поз.\nВалюты оплаты: <b>TON · BYN · Telegram Stars</b>\n\nВыбери действие ниже:`;
-  const reply_markup = getMainMenuKeyboard();
+  const reply_markup = getMainMenuKeyboard(chatId);
 
   const logoPath = path.join(__dirname, 'assets', 'logo.jpg');
   if (fs.existsSync(logoPath)) {
@@ -695,6 +757,260 @@ async function sendMainMenu(chatId, oldMessageId = null) {
   });
 }
 
+async function sendAdminManageList(chatId, oldMessageId = null) {
+  if (oldMessageId) {
+    tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
+  }
+  const list = readGifts();
+  const rows = list.map(g => ([
+    { text: `${g.reserved ? '[БРОНЬ]' : '[В НАЛ]'} ${g.name} ${g.number}`, callback_data: `adm_tog_${g.id}` },
+    { text: 'Удалить', callback_data: `adm_del_${g.id}` }
+  ]));
+  rows.push([{ text: '＋ Добавить подарок', callback_data: 'adm_add' }]);
+  rows.push([{ text: 'Назад в панель', callback_data: 'adm_panel' }]);
+
+  await tgApi('sendMessage', {
+    chat_id: chatId,
+    text: `<b>Управление каталогом (${list.length} поз.)</b>\nНажми на название подарка, чтобы переключить «Бронь», или на «Удалить»:`,
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: rows }
+  });
+}
+
+async function handleWizardInput(chatId, msg) {
+  const state = tgWizard.get(chatId);
+  if (!state) return false;
+
+  const text = (msg.text || '').trim();
+  if (text === '/cancel' || text.toLowerCase() === 'отмена') {
+    tgWizard.delete(chatId);
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Добавление подарка отменено.',
+      reply_markup: getAdminPanelKeyboard()
+    });
+    return true;
+  }
+
+  const cancelKb = { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] };
+
+  if (state.step === 'password') {
+    if (text === ADMIN_PASSWORD) {
+      tgAdminAuth.add(chatId);
+      tgWizard.delete(chatId);
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: '<b>Доступ в админ-панель разрешён.</b>\nТеперь ты можешь добавлять, бронировать и удалять подарки прямо отсюда.',
+        parse_mode: 'HTML',
+        reply_markup: getAdminPanelKeyboard()
+      });
+    } else {
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Неверный пароль. Попробуй ещё раз или нажми «Отменить»:',
+        reply_markup: cancelKb
+      });
+    }
+    return true;
+  }
+
+  if (state.step === 'name') {
+    if (!text) return true;
+    state.data.name = text;
+    state.step = 'number';
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Шаг 2/8. Введи <b>номер подарка</b> (например: <code>#12 345</code>):',
+      parse_mode: 'HTML',
+      reply_markup: cancelKb
+    });
+    return true;
+  }
+
+  if (state.step === 'number') {
+    if (!text) return true;
+    state.data.number = text.startsWith('#') ? text : `#${text}`;
+    state.step = 'model';
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Шаг 3/8. Введи <b>Модель (Model)</b> и через запятую шанс (например: <code>Cyber Bunny, 1.5%</code> или просто <code>Cyber Bunny</code>):',
+      parse_mode: 'HTML',
+      reply_markup: cancelKb
+    });
+    return true;
+  }
+
+  if (state.step === 'model') {
+    if (!text) return true;
+    const parts = text.split(',').map(s => s.trim());
+    state.data.model = parts[0] || 'Original';
+    state.data.modelChance = parts[1] || '1.5%';
+    state.step = 'pattern';
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Шаг 4/8. Введи <b>Узор (Pattern)</b> и шанс через запятую (например: <code>Carrot, 0.5%</code>):',
+      parse_mode: 'HTML',
+      reply_markup: cancelKb
+    });
+    return true;
+  }
+
+  if (state.step === 'pattern') {
+    if (!text) return true;
+    const parts = text.split(',').map(s => s.trim());
+    state.data.pattern = parts[0] || 'Starlight';
+    state.data.patternChance = parts[1] || '0.5%';
+    state.step = 'backdrop';
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Шаг 5/8. Введи <b>Фон (Backdrop)</b> и шанс через запятую (например: <code>Sapphire, 1.5%</code>):',
+      parse_mode: 'HTML',
+      reply_markup: cancelKb
+    });
+    return true;
+  }
+
+  if (state.step === 'backdrop') {
+    if (!text) return true;
+    const parts = text.split(',').map(s => s.trim());
+    state.data.backdrop = parts[0] || 'Onyx Dark';
+    state.data.backdropChance = parts[1] || '1.5%';
+    state.step = 'prices';
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Шаг 6/8. Введи <b>цены через пробел</b> в порядке: <code>TON BYN STARS</code>\nНапример: <code>10 35 700</code>',
+      parse_mode: 'HTML',
+      reply_markup: cancelKb
+    });
+    return true;
+  }
+
+  if (state.step === 'prices') {
+    const nums = text.replace(/,/g, '.').split(/\s+/).map(Number).filter(n => !Number.isNaN(n));
+    if (nums.length < 3) {
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Укажи 3 числа через пробел: <b>TON BYN STARS</b> (например: <code>10 35 700</code>):',
+        parse_mode: 'HTML',
+        reply_markup: cancelKb
+      });
+      return true;
+    }
+    state.data.priceTon = nums[0];
+    state.data.priceByn = nums[1];
+    state.data.priceStars = Math.round(nums[2]);
+    state.step = 'description';
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Шаг 7/8. Введи <b>описание подарка</b> (или отправь <code>-</code>, чтобы сгенерировать автоматически):',
+      parse_mode: 'HTML',
+      reply_markup: cancelKb
+    });
+    return true;
+  }
+
+  if (state.step === 'description') {
+    state.data.description = text === '-' || !text
+      ? `${state.data.name} ${state.data.number} — коллекционный подарок в модели ${state.data.model}.`
+      : text;
+    state.step = 'media';
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Шаг 8/8. Отправь <b>гифку / видео (.mp4) / картинку</b> подарка (можно как медиа или как файл):',
+      parse_mode: 'HTML',
+      reply_markup: cancelKb
+    });
+    return true;
+  }
+
+  if (state.step === 'media') {
+    let fileId = null;
+    let fallbackExt = '.mp4';
+
+    if (msg.animation) {
+      fileId = msg.animation.file_id;
+      fallbackExt = '.mp4';
+    } else if (msg.video) {
+      fileId = msg.video.file_id;
+      fallbackExt = '.mp4';
+    } else if (msg.document) {
+      fileId = msg.document.file_id;
+      fallbackExt = path.extname(msg.document.file_name || '') || '.webp';
+    } else if (msg.photo && msg.photo.length) {
+      fileId = msg.photo[msg.photo.length - 1].file_id;
+      fallbackExt = '.jpg';
+    } else if (msg.sticker) {
+      fileId = msg.sticker.file_id;
+      fallbackExt = msg.sticker.is_video ? '.webm' : '.webp';
+    }
+
+    if (!fileId) {
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Пришли именно гифку, видео, картинку или файл подарка:',
+        reply_markup: cancelKb
+      });
+      return true;
+    }
+
+    await tgApi('sendMessage', { chat_id: chatId, text: 'Сохраняю подарок на сайт и в бота...' });
+
+    try {
+      const savedMedia = await downloadTelegramFile(fileId, fallbackExt);
+      const list = readGifts();
+      const slugId = generateGiftSlug(state.data.model, state.data.name, list);
+
+      const newGift = {
+        id: slugId,
+        name: state.data.name,
+        number: state.data.number,
+        model: state.data.model,
+        file: savedMedia.relUrl,
+        video: savedMedia.relUrl,
+        previewIsVideo: savedMedia.isVideo,
+        sku: state.data.number,
+        prices: {
+          TON: state.data.priceTon,
+          BYN: state.data.priceByn,
+          STARS: state.data.priceStars
+        },
+        subtitle: `Коллекционный подарок · модель ${state.data.model}`,
+        description: state.data.description,
+        glow: '#414448',
+        reserved: false,
+        traits: {
+          model: { name: state.data.model, chance: state.data.modelChance },
+          pattern: { name: state.data.pattern, chance: state.data.patternChance },
+          backdrop: { name: state.data.backdrop, chance: state.data.backdropChance }
+        }
+      };
+
+      list.push(newGift);
+      await writeGifts(list, `Add gift via TG bot: ${newGift.name} ${newGift.number}`);
+      tgWizard.delete(chatId);
+
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: `<b>Подарок опубликован в боте и на сайте!</b>\nID: <code>${newGift.id}</code>`,
+        parse_mode: 'HTML'
+      });
+
+      // Сразу показываем готовую карточку нового подарка с кнопкой «Открыть на сайте»
+      await sendGiftCardWithAnimation(chatId, list.length - 1);
+    } catch (err) {
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: `Ошибка при сохранении: ${err.message}`,
+        reply_markup: getAdminPanelKeyboard()
+      });
+      tgWizard.delete(chatId);
+    }
+    return true;
+  }
+
+  return false;
+}
+
 app.post('/telegram/webhook', async (req, res) => {
   res.sendStatus(200);
   if (!BOT_TOKEN) return;
@@ -707,10 +1023,41 @@ app.post('/telegram/webhook', async (req, res) => {
     const text = (msg.text || '').trim();
 
     if (text.startsWith('/start') || text.startsWith('/menu')) {
+      tgWizard.delete(chatId);
       await sendMainMenu(chatId);
-    } else if (text.startsWith('/catalog')) {
-      await sendGiftCardWithAnimation(chatId, 0);
+      return;
     }
+
+    if (text.startsWith('/admin') || text.startsWith('/add')) {
+      if (tgAdminAuth.has(chatId)) {
+        tgWizard.delete(chatId);
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: '<b>Панель администратора GIFT MARKET</b>',
+          parse_mode: 'HTML',
+          reply_markup: getAdminPanelKeyboard()
+        });
+      } else {
+        tgWizard.set(chatId, { step: 'password', data: {} });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: 'Введи <b>пароль администратора</b>:',
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] }
+        });
+      }
+      return;
+    }
+
+    if (text.startsWith('/catalog')) {
+      tgWizard.delete(chatId);
+      await sendGiftCardWithAnimation(chatId, 0);
+      return;
+    }
+
+    // Если идёт пошаговое добавление подарка
+    const handled = await handleWizardInput(chatId, msg);
+    if (handled) return;
   }
 
   if (update.callback_query) {
@@ -722,10 +1069,57 @@ app.post('/telegram/webhook', async (req, res) => {
     await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
 
     if (data === 'menu') {
+      tgWizard.delete(chatId);
       await sendMainMenu(chatId, msgId);
     } else if (data.startsWith('cat_')) {
       const idx = Number(data.replace('cat_', '')) || 0;
       await sendGiftCardWithAnimation(chatId, idx, msgId);
+    } else if (data === 'adm_cancel') {
+      tgWizard.delete(chatId);
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Действие отменено.',
+        reply_markup: tgAdminAuth.has(chatId) ? getAdminPanelKeyboard() : getMainMenuKeyboard(chatId)
+      });
+    } else if (data === 'adm_panel') {
+      if (!tgAdminAuth.has(chatId)) return;
+      tgWizard.delete(chatId);
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: '<b>Панель администратора GIFT MARKET</b>',
+        parse_mode: 'HTML',
+        reply_markup: getAdminPanelKeyboard()
+      });
+    } else if (data === 'adm_add') {
+      if (!tgAdminAuth.has(chatId)) return;
+      tgWizard.set(chatId, { step: 'name', data: {} });
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Шаг 1/8. Введи <b>название подарка</b> (например: <code>Crystal Skull</code>):',
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] }
+      });
+    } else if (data === 'adm_manage') {
+      if (!tgAdminAuth.has(chatId)) return;
+      await sendAdminManageList(chatId, msgId);
+    } else if (data.startsWith('adm_tog_')) {
+      if (!tgAdminAuth.has(chatId)) return;
+      const id = data.replace('adm_tog_', '');
+      const list = readGifts();
+      const item = list.find(g => g.id === id);
+      if (item) {
+        item.reserved = !item.reserved;
+        await writeGifts(list, `Toggle reserve via TG bot: ${item.name}`);
+      }
+      await sendAdminManageList(chatId, msgId);
+    } else if (data.startsWith('adm_del_')) {
+      if (!tgAdminAuth.has(chatId)) return;
+      const id = data.replace('adm_del_', '');
+      let list = readGifts();
+      const target = list.find(g => g.id === id);
+      list = list.filter(g => g.id !== id);
+      await writeGifts(list, `Delete via TG bot: ${target ? target.name : id}`);
+      await sendAdminManageList(chatId, msgId);
     }
   }
 });
