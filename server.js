@@ -7,10 +7,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'n3yranftlox228';
 
-// Настройки Telegram Бота (добавь BOT_TOKEN и SITE_URL в Render Environment Variables)
+// Настройки Telegram Бота
 const BOT_TOKEN = (process.env.BOT_TOKEN || '').trim();
 const SITE_URL = (process.env.SITE_URL || '').trim().replace(/\/$/, '');
-const ADMIN_CHAT_IDS = (process.env.ADMIN_CHAT_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 // GitHub Persistence
 const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || '').trim();
@@ -254,8 +253,6 @@ app.get('/uploads/:filename', async (req, res) => {
 });
 
 app.use(express.static(__dirname));
-
-// Лёгкий роут для UptimeRobot (чтобы Render не засыпал)
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
 function checkAdmin(req, res, next) {
@@ -408,7 +405,7 @@ app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
 });
 
 /* ============================================================
-   TELEGRAM БОТ (Webhook на том же сервере Render без доп. оплаты)
+   TELEGRAM БОТ С ГИФКАМИ И ВИДЕО КАК НА САЙТЕ
    ============================================================ */
 async function tgApi(method, payload) {
   if (!BOT_TOKEN) return null;
@@ -425,12 +422,59 @@ async function tgApi(method, payload) {
   }
 }
 
+// Отправка локального файла (mp4 / webp / gif / png) в Telegram через FormData
+async function tgSendMultipart(method, fields, fileField, localFilePath) {
+  if (!BOT_TOKEN) return null;
+  try {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== undefined && v !== null) {
+        form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+      }
+    }
+    const fileBuf = fs.readFileSync(localFilePath);
+    const fileName = path.basename(localFilePath);
+    const ext = path.extname(fileName).toLowerCase();
+    const mime =
+      ext === '.mp4' ? 'video/mp4' :
+      ext === '.webm' ? 'video/webm' :
+      ext === '.gif' ? 'image/gif' :
+      ext === '.webp' ? 'image/webp' :
+      ext === '.png' ? 'image/png' : 'image/jpeg';
+
+    form.append(fileField, new Blob([fileBuf], { type: mime }), fileName);
+
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+      method: 'POST',
+      body: form
+    });
+    return await res.json();
+  } catch (e) {
+    console.error('Telegram multipart error:', method, e.message);
+    return null;
+  }
+}
+
+// Находит локальный путь к файлу подарка (видео с фоном или гифку)
+function resolveGiftLocalMedia(g) {
+  const relMedia = (g.video || g.file || '').replace(/^\//, '');
+  if (!relMedia) return null;
+
+  if (relMedia.startsWith('uploads/')) {
+    const p = path.join(UPLOADS_DIR, path.basename(relMedia));
+    if (fs.existsSync(p)) return p;
+  }
+  const directPath = path.join(__dirname, relMedia);
+  if (fs.existsSync(directPath)) return directPath;
+  return null;
+}
+
 function getMainMenuKeyboard() {
   const rows = [];
   if (SITE_URL) {
     rows.push([{ text: 'Открыть GIFT MARKET (Mini App)', web_app: { url: SITE_URL } }]);
   }
-  rows.push([{ text: 'Смотреть каталог подарков', callback_data: 'cat_0' }]);
+  rows.push([{ text: 'Каталог подарков с анимациями', callback_data: 'cat_0' }]);
   rows.push([
     { text: 'Админ @n3yura', url: 'https://t.me/n3yura' },
     { text: 'Админ @NekosikN', url: 'https://t.me/NekosikN' }
@@ -482,7 +526,7 @@ function buildGiftKeyboard(g, index, total) {
   return { inline_keyboard: rows };
 }
 
-async function sendGiftCard(chatId, index, messageId = null) {
+async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null) {
   const list = readGifts();
   if (!list.length) {
     return tgApi('sendMessage', { chat_id: chatId, text: 'Каталог пока пуст.' });
@@ -492,15 +536,50 @@ async function sendGiftCard(chatId, index, messageId = null) {
   const caption = buildGiftCaption(g, safeIdx, list.length);
   const reply_markup = buildGiftKeyboard(g, safeIdx, list.length);
 
-  if (messageId) {
-    await tgApi('editMessageText', {
+  // Удаляем предыдущее сообщение карточки, чтобы отправить новую плавную гифку/видео
+  if (oldMessageId) {
+    tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
+  }
+
+  const localMedia = resolveGiftLocalMedia(g);
+  const relMedia = (g.video || g.file || '').replace(/^\//, '');
+  const publicMediaUrl = SITE_URL && relMedia ? `${SITE_URL}/${relMedia}` : null;
+
+  let sent = null;
+
+  // 1) Пробуем отправить локальный .mp4 / .gif / .webp напрямую с диска как анимацию
+  if (localMedia) {
+    const ext = path.extname(localMedia).toLowerCase();
+    if (ext === '.mp4' || ext === '.gif') {
+      sent = await tgSendMultipart('sendAnimation', {
+        chat_id: chatId,
+        caption,
+        parse_mode: 'HTML',
+        reply_markup
+      }, 'animation', localMedia);
+    } else {
+      sent = await tgSendMultipart('sendDocument', {
+        chat_id: chatId,
+        caption,
+        parse_mode: 'HTML',
+        reply_markup
+      }, 'document', localMedia);
+    }
+  }
+
+  // 2) Если локально файла нет (например, после сна Render), пробуем по публичной ссылке SITE_URL
+  if ((!sent || !sent.ok) && publicMediaUrl) {
+    sent = await tgApi('sendAnimation', {
       chat_id: chatId,
-      message_id: messageId,
-      text: caption,
+      animation: publicMediaUrl,
+      caption,
       parse_mode: 'HTML',
       reply_markup
     });
-  } else {
+  }
+
+  // 3) Запасной вариант — текстом, если медиа не прошло
+  if (!sent || !sent.ok) {
     await tgApi('sendMessage', {
       chat_id: chatId,
       text: caption,
@@ -508,6 +587,33 @@ async function sendGiftCard(chatId, index, messageId = null) {
       reply_markup
     });
   }
+}
+
+async function sendMainMenu(chatId, oldMessageId = null) {
+  if (oldMessageId) {
+    tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
+  }
+  const count = readGifts().length;
+  const text = `<b>GIFT MARKET</b> — магазин цифровых подарков Telegram.\n\nСейчас в каталоге: <b>${count}</b> поз.\nВалюты оплаты: <b>TON · BYN · Telegram Stars</b>\n\nВыбери действие ниже:`;
+  const reply_markup = getMainMenuKeyboard();
+
+  const logoPath = path.join(__dirname, 'assets', 'logo.jpg');
+  if (fs.existsSync(logoPath)) {
+    const res = await tgSendMultipart('sendPhoto', {
+      chat_id: chatId,
+      caption: text,
+      parse_mode: 'HTML',
+      reply_markup
+    }, 'photo', logoPath);
+    if (res && res.ok) return;
+  }
+
+  await tgApi('sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    reply_markup
+  });
 }
 
 app.post('/telegram/webhook', async (req, res) => {
@@ -522,21 +628,9 @@ app.post('/telegram/webhook', async (req, res) => {
     const text = (msg.text || '').trim();
 
     if (text.startsWith('/start') || text.startsWith('/menu')) {
-      const count = readGifts().length;
-      await tgApi('sendMessage', {
-        chat_id: chatId,
-        text: `<b>GIFT MARKET</b> — магазин цифровых подарков Telegram.\n\nСейчас в каталоге: <b>${count}</b> поз.\nВалюты оплаты: <b>TON · BYN · Telegram Stars</b>\n\nВыбери действие ниже:`,
-        parse_mode: 'HTML',
-        reply_markup: getMainMenuKeyboard()
-      });
+      await sendMainMenu(chatId);
     } else if (text.startsWith('/catalog')) {
-      await sendGiftCard(chatId, 0);
-    } else if (text.startsWith('/id')) {
-      await tgApi('sendMessage', {
-        chat_id: chatId,
-        text: `Твой Telegram ID: <code>${msg.from.id}</code>`,
-        parse_mode: 'HTML'
-      });
+      await sendGiftCardWithAnimation(chatId, 0);
     }
   }
 
@@ -549,17 +643,10 @@ app.post('/telegram/webhook', async (req, res) => {
     await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
 
     if (data === 'menu') {
-      const count = readGifts().length;
-      await tgApi('editMessageText', {
-        chat_id: chatId,
-        message_id: msgId,
-        text: `<b>GIFT MARKET</b> — магазин цифровых подарков Telegram.\n\nСейчас в каталоге: <b>${count}</b> поз.\nВалюты оплаты: <b>TON · BYN · Telegram Stars</b>\n\nВыбери действие ниже:`,
-        parse_mode: 'HTML',
-        reply_markup: getMainMenuKeyboard()
-      });
+      await sendMainMenu(chatId, msgId);
     } else if (data.startsWith('cat_')) {
       const idx = Number(data.replace('cat_', '')) || 0;
-      await sendGiftCard(chatId, idx, msgId);
+      await sendGiftCardWithAnimation(chatId, idx, msgId);
     }
   }
 });
