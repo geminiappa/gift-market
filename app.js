@@ -630,17 +630,24 @@ function renderGift(id) {
 }
 
 function currentRoute() {
-  const params = new URLSearchParams(location.search);
-  const queryGift = params.get('gift');
   const hash = location.hash.replace(/^#/, '');
 
-  if (hash.startsWith('gift/')) {
-    return { page: 'gift', id: hash.slice(5) };
+  // Если пользователь уже перешёл по внутренней навигации сайта (#catalog, #home и т.д.)
+  if (hash && !hash.startsWith('tgWebApp')) {
+    if (hash.startsWith('gift/')) {
+      return { page: 'gift', id: hash.slice(5) };
+    }
+    return { page: hash };
   }
+
+  // Если открыто из Telegram-бота по ссылке ?gift=rabbit (даже когда Telegram добавил #tgWebAppData=...)
+  const params = new URLSearchParams(location.search);
+  const queryGift = params.get('gift');
   if (queryGift) {
     return { page: 'gift', id: queryGift };
   }
-  return { page: hash || 'home' };
+
+  return { page: 'home' };
 }
 
 function render() {
@@ -940,7 +947,14 @@ $('#mobileNav').addEventListener('click', e => {
   if (e.target.closest('a')) $('#mobileNav').classList.remove('show');
 });
 
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => {
+  const hash = location.hash.replace(/^#/, '');
+  if (hash && !hash.startsWith('tgWebApp') && location.search.includes('gift=')) {
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+  render();
+});
+
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeCart();
