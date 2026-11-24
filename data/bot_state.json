@@ -12,7 +12,11 @@
     820298635
   ],
   "stats": {
-    "viewsByGift": {},
+    "viewsByGift": {
+      "kakashka": 1,
+      "rabbit": 1,
+      "tank": 1
+    },
     "buyClicks": 0,
     "reserveClicks": 0
   }
