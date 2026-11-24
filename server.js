@@ -292,10 +292,23 @@ app.post('/api/gifts', checkAdmin, upload.fields([{ name: 'avatar', maxCount: 1 
     const rawNum = (body.number || '#10 001').trim();
     const number = rawNum.startsWith('#') ? rawNum : `#${rawNum}`;
     const model = (body.model || 'Original').trim();
+    const name = (body.name || 'New Gift').trim();
+
+    // Генерируем красивый читаемый id (как 'rabbit', 'deadpoo', 'air-bunny')
+    const baseSlug = (model || name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'gift';
+    const list = readGifts();
+    let slugId = baseSlug;
+    let counter = 2;
+    while (list.some(item => item.id === slugId)) {
+      slugId = `${baseSlug}-${counter++}`;
+    }
 
     const newGift = {
-      id: 'gift_' + Date.now(),
-      name: (body.name || 'New Gift').trim(),
+      id: slugId,
+      name,
       number,
       model,
       file: avatarUrl,
@@ -314,7 +327,6 @@ app.post('/api/gifts', checkAdmin, upload.fields([{ name: 'avatar', maxCount: 1 
       }
     };
 
-    const list = readGifts();
     list.push(newGift);
     await writeGifts(list, `Add gift ${newGift.name} ${newGift.number}`);
     res.json(list);
@@ -590,7 +602,7 @@ function buildGiftKeyboard(g, index, total) {
   }
 
   if (SITE_URL) {
-    rows.push([{ text: 'Открыть на сайте', web_app: { url: `${SITE_URL}/?gift=${encodeURIComponent(g.id)}#gift/${encodeURIComponent(g.id)}` } }]);
+    rows.push([{ text: 'Открыть на сайте', web_app: { url: `${SITE_URL}/?gift=${encodeURIComponent(g.id)}` } }]);
   }
 
   rows.push([{ text: 'В главное меню', callback_data: 'menu' }]);
