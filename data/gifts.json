@@ -130,38 +130,5 @@
         "chance": "1.5%"
       }
     }
-  },
-  {
-    "id": "12",
-    "name": "testdb1",
-    "number": "#67676767",
-    "model": "12",
-    "file": "uploads/1795538612686_yqsbt7.mp4",
-    "video": "uploads/1795538612686_yqsbt7.mp4",
-    "previewIsVideo": true,
-    "sku": "#67676767",
-    "prices": {
-      "TON": 12,
-      "BYN": 122,
-      "STARS": 1
-    },
-    "subtitle": "Коллекционный подарок · модель 12",
-    "description": "testdb1 #67676767 — коллекционный подарок в модели 12.",
-    "glow": "#414448",
-    "reserved": false,
-    "traits": {
-      "model": {
-        "name": "12",
-        "chance": "1.5%"
-      },
-      "pattern": {
-        "name": "12",
-        "chance": "0.5%"
-      },
-      "backdrop": {
-        "name": "12",
-        "chance": "1.5%"
-      }
-    }
   }
 ]
