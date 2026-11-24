@@ -555,9 +555,9 @@ function resolveGiftLocalMedia(g) {
 function getMainMenuKeyboard() {
   const rows = [];
   if (SITE_URL) {
-    rows.push([{ text: 'Открыть GIFT MARKET (Mini App)', web_app: { url: SITE_URL } }]);
+    rows.push([{ text: 'Открыть GIFT MARKET', web_app: { url: SITE_URL } }]);
   }
-  rows.push([{ text: 'Каталог подарков с анимациями', callback_data: 'cat_0' }]);
+  rows.push([{ text: 'Каталог подарков', callback_data: 'cat_0' }]);
   rows.push([
     { text: 'Админ @n3yura', url: 'https://t.me/n3yura' },
     { text: 'Админ @NekosikN', url: 'https://t.me/NekosikN' }
