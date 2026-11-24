@@ -137,10 +137,23 @@ let toastTimer;
 
 const money = (amount, code) => `${amount.toLocaleString('en-US')} ${code}`;
 const saveCart = () => localStorage.setItem('giftMarketCart', JSON.stringify(cart));
+
 const getGift = id => {
   if (!id) return null;
-  const cleanId = decodeURIComponent(String(id)).trim();
-  return GIFTS.find(g => String(g.id) === cleanId || String(g.sku) === cleanId);
+  const cleanId = decodeURIComponent(String(id)).trim().toLowerCase();
+  const digitsOnly = cleanId.replace(/\D/g, '');
+  return GIFTS.find(g => {
+    const gId = String(g.id || '').trim().toLowerCase();
+    const gSku = String(g.sku || '').trim().toLowerCase();
+    const gNum = String(g.number || '').trim().toLowerCase();
+    const gDigits = gNum.replace(/\D/g, '');
+    return (
+      gId === cleanId ||
+      gSku === cleanId ||
+      gNum === cleanId ||
+      (digitsOnly.length >= 4 && gDigits === digitsOnly)
+    );
+  });
 };
 
 cart = cart.filter(line => {
@@ -619,12 +632,15 @@ function renderGift(id) {
 function currentRoute() {
   const params = new URLSearchParams(location.search);
   const queryGift = params.get('gift');
-  if (queryGift && !location.hash) {
+  const hash = location.hash.replace(/^#/, '');
+
+  if (hash.startsWith('gift/')) {
+    return { page: 'gift', id: hash.slice(5) };
+  }
+  if (queryGift) {
     return { page: 'gift', id: queryGift };
   }
-  const hash = location.hash.replace(/^#/, '') || 'home';
-  if (hash.startsWith('gift/')) return { page: 'gift', id: hash.slice(5) };
-  return { page: hash };
+  return { page: hash || 'home' };
 }
 
 function render() {
