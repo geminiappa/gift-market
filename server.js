@@ -2,14 +2,15 @@ const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'n3yranftlox228';
 
-// Настройки Telegram Бота
+// Настройки Telegram Бота (Render автоматически подставляет RENDER_EXTERNAL_URL, если SITE_URL не задан)
 const BOT_TOKEN = (process.env.BOT_TOKEN || '').trim();
-const SITE_URL = (process.env.SITE_URL || '').trim().replace(/\/$/, '');
+const SITE_URL = (process.env.SITE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
 
 // GitHub Persistence
 const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || '').trim();
@@ -405,61 +406,131 @@ app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
 });
 
 /* ============================================================
-   TELEGRAM БОТ С ГИФКАМИ И ВИДЕО КАК НА САЙТЕ
+   TELEGRAM API ЧЕРЕЗ НАДЁЖНЫЙ IPv4 HTTPS (БЕЗ FETCH FAILED НА RENDER)
    ============================================================ */
-async function tgApi(method, payload) {
-  if (!BOT_TOKEN) return null;
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    return await res.json();
-  } catch (e) {
-    console.error('Telegram API error:', method, e.message);
-    return null;
-  }
-}
-
-// Отправка локального файла (mp4 / webp / gif / png) в Telegram через FormData
-async function tgSendMultipart(method, fields, fileField, localFilePath) {
-  if (!BOT_TOKEN) return null;
-  try {
-    const form = new FormData();
-    for (const [k, v] of Object.entries(fields)) {
-      if (v !== undefined && v !== null) {
-        form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+function tgApi(method, payload) {
+  if (!BOT_TOKEN) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const bodyStr = JSON.stringify(payload || {});
+    const req = https.request(
+      {
+        hostname: 'api.telegram.org',
+        port: 443,
+        path: `/bot${BOT_TOKEN}/${method}`,
+        method: 'POST',
+        family: 4, // принудительно IPv4, чтобы Render не выдавал fetch failed
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(bodyStr)
+        }
+      },
+      res => {
+        let data = '';
+        res.on('data', chunk => (data += chunk));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            resolve(null);
+          }
+        });
       }
-    }
-    const fileBuf = fs.readFileSync(localFilePath);
-    const fileName = path.basename(localFilePath);
-    const ext = path.extname(fileName).toLowerCase();
-    const mime =
-      ext === '.mp4' ? 'video/mp4' :
-      ext === '.webm' ? 'video/webm' :
-      ext === '.gif' ? 'image/gif' :
-      ext === '.webp' ? 'image/webp' :
-      ext === '.png' ? 'image/png' : 'image/jpeg';
-
-    form.append(fileField, new Blob([fileBuf], { type: mime }), fileName);
-
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
-      method: 'POST',
-      body: form
+    );
+    req.on('error', err => {
+      console.error('Telegram API error:', method, err.message);
+      resolve(null);
     });
-    return await res.json();
-  } catch (e) {
-    console.error('Telegram multipart error:', method, e.message);
-    return null;
-  }
+    req.setTimeout(15000, () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.write(bodyStr);
+    req.end();
+  });
 }
 
-// Находит локальный путь к файлу подарка (видео с фоном или гифку)
+function tgSendMultipart(method, fields, fileField, localFilePath) {
+  if (!BOT_TOKEN) return Promise.resolve(null);
+  return new Promise(resolve => {
+    try {
+      const boundary = '----GiftMarketBoundary' + Math.random().toString(36).slice(2);
+      const fileBuf = fs.readFileSync(localFilePath);
+      const fileName = path.basename(localFilePath);
+      const ext = path.extname(fileName).toLowerCase();
+      const mime =
+        ext === '.mp4' ? 'video/mp4' :
+        ext === '.webm' ? 'video/webm' :
+        ext === '.gif' ? 'image/gif' :
+        ext === '.webp' ? 'image/webp' :
+        ext === '.png' ? 'image/png' : 'image/jpeg';
+
+      const parts = [];
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) {
+          const valStr = typeof v === 'object' ? JSON.stringify(v) : String(v);
+          parts.push(
+            Buffer.from(
+              `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${valStr}\r\n`,
+              'utf8'
+            )
+          );
+        }
+      }
+
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${fileField}"; filename="${fileName}"\r\nContent-Type: ${mime}\r\n\r\n`,
+          'utf8'
+        )
+      );
+      parts.push(fileBuf);
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+
+      const fullBody = Buffer.concat(parts);
+
+      const req = https.request(
+        {
+          hostname: 'api.telegram.org',
+          port: 443,
+          path: `/bot${BOT_TOKEN}/${method}`,
+          method: 'POST',
+          family: 4,
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': fullBody.length
+          }
+        },
+        res => {
+          let data = '';
+          res.on('data', chunk => (data += chunk));
+          res.on('end', () => {
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              resolve(null);
+            }
+          });
+        }
+      );
+      req.on('error', err => {
+        console.error('Telegram multipart error:', method, err.message);
+        resolve(null);
+      });
+      req.setTimeout(25000, () => {
+        req.destroy();
+        resolve(null);
+      });
+      req.write(fullBody);
+      req.end();
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
 function resolveGiftLocalMedia(g) {
   const relMedia = (g.video || g.file || '').replace(/^\//, '');
   if (!relMedia) return null;
-
   if (relMedia.startsWith('uploads/')) {
     const p = path.join(UPLOADS_DIR, path.basename(relMedia));
     if (fs.existsSync(p)) return p;
@@ -519,7 +590,7 @@ function buildGiftKeyboard(g, index, total) {
   }
 
   if (SITE_URL) {
-    rows.push([{ text: 'Открыть на сайте', web_app: { url: `${SITE_URL}/#gift/${g.id}` } }]);
+    rows.push([{ text: 'Открыть на сайте', web_app: { url: `${SITE_URL}/?gift=${encodeURIComponent(g.id)}#gift/${encodeURIComponent(g.id)}` } }]);
   }
 
   rows.push([{ text: 'В главное меню', callback_data: 'menu' }]);
@@ -536,7 +607,6 @@ async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null) {
   const caption = buildGiftCaption(g, safeIdx, list.length);
   const reply_markup = buildGiftKeyboard(g, safeIdx, list.length);
 
-  // Удаляем предыдущее сообщение карточки, чтобы отправить новую плавную гифку/видео
   if (oldMessageId) {
     tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
   }
@@ -547,7 +617,6 @@ async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null) {
 
   let sent = null;
 
-  // 1) Пробуем отправить локальный .mp4 / .gif / .webp напрямую с диска как анимацию
   if (localMedia) {
     const ext = path.extname(localMedia).toLowerCase();
     if (ext === '.mp4' || ext === '.gif') {
@@ -567,7 +636,6 @@ async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null) {
     }
   }
 
-  // 2) Если локально файла нет (например, после сна Render), пробуем по публичной ссылке SITE_URL
   if ((!sent || !sent.ok) && publicMediaUrl) {
     sent = await tgApi('sendAnimation', {
       chat_id: chatId,
@@ -578,7 +646,6 @@ async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null) {
     });
   }
 
-  // 3) Запасной вариант — текстом, если медиа не прошло
   if (!sent || !sent.ok) {
     await tgApi('sendMessage', {
       chat_id: chatId,
@@ -651,17 +718,22 @@ app.post('/telegram/webhook', async (req, res) => {
   }
 });
 
-// Запуск сервера + авторегистрация Webhook в Telegram
+async function setupWebhookWithRetry(attempt = 1) {
+  if (!BOT_TOKEN || !SITE_URL) return;
+  const hookUrl = `${SITE_URL}/telegram/webhook`;
+  const r = await tgApi('setWebhook', { url: hookUrl });
+  console.log(`Telegram webhook attempt #${attempt}:`, hookUrl, r?.ok);
+  if ((!r || !r.ok) && attempt < 4) {
+    setTimeout(() => setupWebhookWithRetry(attempt + 1), 4000);
+  }
+}
+
 (async () => {
   const remoteList = await githubFetchGifts();
   if (!remoteList) readGifts();
 
-  app.listen(PORT, async () => {
+  app.listen(PORT, () => {
     console.log(`GIFT MARKET server running on port ${PORT}`);
-    if (BOT_TOKEN && SITE_URL) {
-      const hookUrl = `${SITE_URL}/telegram/webhook`;
-      const r = await tgApi('setWebhook', { url: hookUrl });
-      console.log('Telegram webhook set:', hookUrl, r?.ok);
-    }
+    setTimeout(() => setupWebhookWithRetry(1), 2000);
   });
 })();
