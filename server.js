@@ -748,8 +748,8 @@ function getMainMenuKeyboard(chatId) {
   ]);
   if (SITE_URL) {
     rows.push([
-      { text: 'Политика конфиденциальности', web_app: { url: `${SITE_URL}/#privacy` } },
-      { text: 'Соглашение', web_app: { url: `${SITE_URL}/#terms` } }
+      { text: 'Политика конфиденциальности', web_app: { url: `${SITE_URL}/?page=privacy` } },
+      { text: 'Соглашение', web_app: { url: `${SITE_URL}/?page=terms` } }
     ]);
   }
   if (tgAdminAuth.has(chatId)) {
