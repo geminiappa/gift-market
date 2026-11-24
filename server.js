@@ -746,6 +746,12 @@ function getMainMenuKeyboard(chatId) {
     { text: 'Админ @n3yura', url: 'https://t.me/n3yura' },
     { text: 'Админ @NekosikN', url: 'https://t.me/NekosikN' }
   ]);
+  if (SITE_URL) {
+    rows.push([
+      { text: 'Политика конфиденциальности', web_app: { url: `${SITE_URL}/#privacy` } },
+      { text: 'Соглашение', web_app: { url: `${SITE_URL}/#terms` } }
+    ]);
+  }
   if (tgAdminAuth.has(chatId)) {
     rows.push([{ text: 'Панель админа', callback_data: 'adm_panel' }]);
   }
