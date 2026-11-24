@@ -722,24 +722,26 @@ function renderGift(id) {
 }
 
 function currentRoute() {
+  const params = new URLSearchParams(location.search);
+  const queryPage = params.get('page');
+  if (queryPage === 'privacy' || queryPage === 'terms') {
+    return { page: queryPage };
+  }
+
+  const queryGift = params.get('gift');
+  if (queryGift) {
+    return { page: 'gift', id: queryGift };
+  }
+
   const hash = location.hash.replace(/^#/, '');
+  if (hash.startsWith('privacy')) return { page: 'privacy' };
+  if (hash.startsWith('terms')) return { page: 'terms' };
 
   if (hash && !hash.startsWith('tgWebApp')) {
     if (hash.startsWith('gift/')) {
       return { page: 'gift', id: hash.slice(5) };
     }
     return { page: hash };
-  }
-
-  const params = new URLSearchParams(location.search);
-  const queryGift = params.get('gift');
-  if (queryGift) {
-    return { page: 'gift', id: queryGift };
-  }
-
-  const queryPage = params.get('page');
-  if (queryPage) {
-    return { page: queryPage };
   }
 
   return { page: 'home' };
