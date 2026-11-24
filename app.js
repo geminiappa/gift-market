@@ -324,6 +324,7 @@ function renderFaq() {
 function renderContacts() {
   const orderText = getOrderMessageText();
   const encodedText = orderText ? `?text=${encodeURIComponent(orderText)}` : '';
+  const techSupportText = `?text=${encodeURIComponent('Привет! Нашёл техническую проблему на сайте / в боте GIFT MARKET: ')}`;
   const selectedHtml = cart.length ? `
     <div class="selected-order-box">
       <div class="selected-order-head">
@@ -336,7 +337,7 @@ function renderContacts() {
           return g ? `<div class="selected-order-line"><span>${g.name} · ${g.model} ${g.number} (1 шт.)</span><b>${money(g.prices[currency], currency)}</b></div>` : '';
         }).join('')}
       </div>
-      <p class="selected-order-hint">Нажми на любого администратора ниже — откроется чат в Telegram с готовым сообщением для покупки.</p>
+      <p class="selected-order-hint">Нажми на одного из администраторов продаж ниже — откроется чат в Telegram с готовым сообщением для покупки.</p>
     </div>
   ` : '';
 
@@ -345,13 +346,13 @@ function renderContacts() {
       <div class="eyebrow">GET IN TOUCH</div>
       <h1>Связаться <span>с нами.</span></h1>
     </div>
-    <p>Для покупки подарка нажми на одного из администраторов ниже и напиши в Telegram.</p>
+    <p>По вопросам покупки подарков пиши администраторам продаж, а по техническим проблемам с сайтом или ботом — техническому администратору.</p>
   </section>
   <div class="contact-layout contact-single">
     <section class="contact-card">
       <div class="eyebrow">TEAM & ADMINS</div>
       <h3>Администрация магазина.</h3>
-      <p>Выбери администратора, чтобы перейти в Telegram и написать для покупки.</p>
+      <p>Выбери нужный контакт в зависимости от твоего вопроса.</p>
       ${selectedHtml}
       <div class="admins-list admins-grid">
         <a class="admin-item" href="https://t.me/n3yura${encodedText}" target="_blank" rel="noopener noreferrer">
@@ -380,6 +381,21 @@ function renderContacts() {
               <span class="admin-role">ADMIN</span>
             </div>
             <span class="admin-handle">@NekosikN · Написать для покупки</span>
+          </div>
+          <span class="admin-arrow">↗</span>
+        </a>
+
+        <a class="admin-item" href="https://t.me/yapp1kc${techSupportText}" target="_blank" rel="noopener noreferrer" style="grid-column: 1 / -1;">
+          <div class="admin-avatar-wrap">
+            <img src="assets/admin_yapp1kc.png" alt="yapp1k" class="admin-avatar">
+            <span class="admin-status"></span>
+          </div>
+          <div class="admin-meta">
+            <div class="admin-name-row">
+              <b>yapp1k</b>
+              <span class="admin-role">TECH. ADMIN</span>
+            </div>
+            <span class="admin-handle">@yapp1kc · Писать только с проблемами по боту или сайту</span>
           </div>
           <span class="admin-arrow">↗</span>
         </a>
