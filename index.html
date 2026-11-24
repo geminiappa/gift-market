@@ -9,8 +9,91 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css" />
   <style>
-    .brand-mark { width: 38px; height: 38px; border-radius: 10px; overflow: hidden; flex-shrink: 0; display: inline-flex; }
-    .brand-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    /* Фикс шапки и футера на случай если в style.css использованы старые имена классов */
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 70px;
+      gap: 20px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      overflow: hidden;
+      flex-shrink: 0;
+      display: inline-flex;
+    }
+    .brand-mark img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1.6fr 0.7fr 0.7fr;
+      gap: 32px;
+      padding: 40px 0 28px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .footer-grid > div > a {
+      display: block;
+      margin-bottom: 8px;
+    }
+    .footer-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 0 28px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .legal-consent-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.78);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .legal-consent-overlay.show {
+      display: flex;
+    }
+    .legal-consent-card {
+      width: 100%;
+      max-width: 440px;
+      background: #17181c;
+      border: 1px solid #2f3138;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+    }
+    @media (max-width: 760px) {
+      .nav { display: none; }
+      .footer-grid { grid-template-columns: 1fr; gap: 22px; }
+    }
   </style>
 </head>
 <body>
@@ -63,8 +146,8 @@
         <div class="footer-brand">GIFT<span>MARKET</span></div>
         <p>Цифровые коллекционные подарки в лаконичном монохромном оформлении. Выбирай, собирай и оформляй заказ.</p>
         <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;font-size:11px;">
-          <a href="#privacy" style="color:#b8bac0;text-decoration:underline;">Политика конфиденциальности</a>
-          <a href="#terms" style="color:#b8bac0;text-decoration:underline;">Пользовательское соглашение</a>
+          <a href="#privacy" style="color:#b8bac0;text-decoration:underline;text-underline-offset:3px;">Политика конфиденциальности</a>
+          <a href="#terms" style="color:#b8bac0;text-decoration:underline;text-underline-offset:3px;">Пользовательское соглашение</a>
         </div>
       </div>
       <div>
@@ -126,13 +209,13 @@
     </div>
   </div>
 
-  <!-- Табличка ознакомления с политикой и соглашением -->
-  <div class="modal-layer" id="legalConsentModal" aria-hidden="true" style="z-index:9999;">
-    <div class="modal-box" style="max-width:440px;">
+  <!-- Табличка ознакомления с политикой и соглашением при первом заходе -->
+  <div class="legal-consent-overlay" id="legalConsentModal" aria-hidden="true">
+    <div class="legal-consent-card">
       <div class="eyebrow" style="margin-bottom:8px;">ПРАВИЛА СЕРВИСА · G1FT MARKET</div>
-      <h3 style="font-size:18px;margin:0 0 10px;">Ознакомление с документами</h3>
+      <h3 style="font-size:18px;margin:0 0 10px;color:#fff;">Ознакомление с документами</h3>
       <p style="font-size:12.5px;line-height:1.55;color:#b8bac0;margin:0 0 14px;">
-        Продолжая использование сайта <b style="color:#fff;">G1FT MARKET</b> и бота <b style="color:#fff;">@giftmarket_by_bot</b>, вы подтверждаете ознакомление и согласие с условиями работы сервиса:
+        Продолжая использование сайта <b style="color:#fff;">G1FT MARKET</b> и бота <b style="color:#fff;">@giftmarket_by_bot</b>, вы подтверждаете ознакомление и согласие с правилами сервиса:
       </p>
       <div style="display:flex;flex-direction:column;gap:8px;margin:0 0 16px;">
         <a class="button button-dark button-full" href="#privacy" id="consentOpenPrivacy">Политика конфиденциальности ↗</a>
@@ -188,6 +271,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=40"></script>
+  <script src="app.js?v=42"></script>
 </body>
 </html>
