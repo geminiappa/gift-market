@@ -82,7 +82,7 @@
     "subtitle": "Коллекционный подарок · модель Water Tank",
     "description": "Pool Float #52 138 — модель Water Tank. Необычный водный танк с утёнком и брызгами. Сейчас подарок находится в брони.",
     "glow": "#3f4441",
-    "reserved": true,
+    "reserved": false,
     "traits": {
       "model": {
         "name": "Water Tank",
