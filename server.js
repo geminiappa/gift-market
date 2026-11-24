@@ -11,6 +11,13 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'n3yranftlox228';
 // Настройки Telegram Бота
 const BOT_TOKEN = (process.env.BOT_TOKEN || '').trim();
 const SITE_URL = (process.env.SITE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
+const ENV_ADMIN_IDS = (process.env.ADMIN_CHAT_IDS || '')
+  .split(',')
+  .map(s => Number(s.trim()))
+  .filter(n => !Number.isNaN(n) && n !== 0);
+
+// Белый список юзернеймов, которым приходят уведомления о бронях и покупках
+const ALLOWED_NOTIFY_USERNAMES = new Set(['yapp1kc', 'nekosikn', 'n3yura']);
 
 // GitHub Persistence
 const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || '').trim();
@@ -21,6 +28,7 @@ const GITHUB_BASE_PATH = (process.env.GITHUB_BASE_PATH || '').replace(/^\/|\/$/g
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const GIFTS_FILE = path.join(DATA_DIR, 'gifts.json');
+const BOT_STATE_FILE = path.join(DATA_DIR, 'bot_state.json');
 
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
@@ -167,9 +175,9 @@ async function githubPutFile(relPath, bufferContent, commitMessage) {
   return putRes.ok;
 }
 
-async function githubFetchGifts() {
+async function githubFetchJson(relPath) {
   if (!GITHUB_TOKEN || !GITHUB_REPO) return null;
-  const fullRepoPath = ghRepoPath('data/gifts.json');
+  const fullRepoPath = ghRepoPath(relPath);
   const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/${fullRepoPath}?ref=${encodeURIComponent(GITHUB_BRANCH)}`;
   try {
     const res = await fetch(apiUrl, {
@@ -182,25 +190,124 @@ async function githubFetchGifts() {
     if (!res.ok) return null;
     const data = await res.json();
     const decoded = Buffer.from(data.content, 'base64').toString('utf8');
-    const parsed = JSON.parse(decoded);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      fs.writeFileSync(GIFTS_FILE, JSON.stringify(parsed, null, 2), 'utf8');
-      return parsed;
-    }
-  } catch (e) {}
-  return null;
+    return JSON.parse(decoded);
+  } catch (e) {
+    return null;
+  }
 }
 
-function readGifts() {
-  if (!fs.existsSync(GIFTS_FILE)) {
-    fs.writeFileSync(GIFTS_FILE, JSON.stringify(DEFAULT_GIFTS, null, 2), 'utf8');
-    return DEFAULT_GIFTS;
+/* === Хранилище статистики бота, подписчиков и разрешённых админов === */
+function defaultBotState() {
+  return {
+    users: [],
+    subscribers: [],
+    adminIds: [...ENV_ADMIN_IDS],
+    stats: {
+      viewsByGift: {},
+      buyClicks: 0,
+      reserveClicks: 0
+    }
+  };
+}
+
+function readBotState() {
+  if (!fs.existsSync(BOT_STATE_FILE)) {
+    const init = defaultBotState();
+    fs.writeFileSync(BOT_STATE_FILE, JSON.stringify(init, null, 2), 'utf8');
+    return init;
   }
   try {
-    return JSON.parse(fs.readFileSync(GIFTS_FILE, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(BOT_STATE_FILE, 'utf8'));
+    return {
+      users: Array.isArray(parsed.users) ? parsed.users : [],
+      subscribers: Array.isArray(parsed.subscribers) ? parsed.subscribers : [],
+      adminIds: Array.from(new Set([...(Array.isArray(parsed.adminIds) ? parsed.adminIds : []), ...ENV_ADMIN_IDS])),
+      stats: {
+        viewsByGift: parsed.stats?.viewsByGift || {},
+        buyClicks: Number(parsed.stats?.buyClicks || 0),
+        reserveClicks: Number(parsed.stats?.reserveClicks || 0)
+      }
+    };
   } catch (e) {
-    return DEFAULT_GIFTS;
+    return defaultBotState();
   }
+}
+
+let botStateSyncTimer = null;
+function writeBotState(state, immediateGithub = false) {
+  const jsonStr = JSON.stringify(state, null, 2);
+  fs.writeFileSync(BOT_STATE_FILE, jsonStr, 'utf8');
+  if (!GITHUB_TOKEN || !GITHUB_REPO) return;
+
+  if (immediateGithub) {
+    clearTimeout(botStateSyncTimer);
+    githubPutFile('data/bot_state.json', Buffer.from(jsonStr, 'utf8'), 'Sync bot stats & subscribers').catch(() => {});
+  } else {
+    clearTimeout(botStateSyncTimer);
+    botStateSyncTimer = setTimeout(() => {
+      const latest = fs.readFileSync(BOT_STATE_FILE);
+      githubPutFile('data/bot_state.json', latest, 'Sync bot stats & subscribers').catch(() => {});
+    }, 10000);
+  }
+}
+
+function trackBotUser(chatId, username = '') {
+  const state = readBotState();
+  let changed = false;
+
+  if (!state.users.includes(chatId)) {
+    state.users.push(chatId);
+    changed = true;
+  }
+
+  const cleanUser = String(username || '').replace(/^@/, '').trim().toLowerCase();
+  if (cleanUser && ALLOWED_NOTIFY_USERNAMES.has(cleanUser)) {
+    if (!state.adminIds.includes(chatId)) {
+      state.adminIds.push(chatId);
+      changed = true;
+    }
+    tgAdminAuth.add(chatId);
+  }
+
+  if (changed) {
+    writeBotState(state, true);
+  }
+}
+
+function trackGiftView(giftId) {
+  const state = readBotState();
+  state.stats.viewsByGift[giftId] = (state.stats.viewsByGift[giftId] || 0) + 1;
+  writeBotState(state, false);
+}
+
+/* === Каталог подарков + автоматическое снятие 15-минутной брони === */
+function readGifts() {
+  let list;
+  if (!fs.existsSync(GIFTS_FILE)) {
+    fs.writeFileSync(GIFTS_FILE, JSON.stringify(DEFAULT_GIFTS, null, 2), 'utf8');
+    list = DEFAULT_GIFTS;
+  } else {
+    try {
+      list = JSON.parse(fs.readFileSync(GIFTS_FILE, 'utf8'));
+    } catch (e) {
+      list = DEFAULT_GIFTS;
+    }
+  }
+
+  const now = Date.now();
+  let expiredChanged = false;
+  for (const g of list) {
+    if (g.reserved && g.reservedUntil && now >= Number(g.reservedUntil)) {
+      g.reserved = false;
+      delete g.reservedUntil;
+      delete g.reservedBy;
+      expiredChanged = true;
+    }
+  }
+  if (expiredChanged) {
+    writeGifts(list, 'Auto-release expired 15m reservation').catch(() => {});
+  }
+  return list;
 }
 
 async function writeGifts(list, commitMsg = 'Update gifts catalog') {
@@ -223,6 +330,12 @@ function generateGiftSlug(model, name, existingList) {
   }
   return slugId;
 }
+
+setInterval(() => {
+  try {
+    readGifts();
+  } catch (e) {}
+}, 30000);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
@@ -333,6 +446,9 @@ app.post('/api/gifts', checkAdmin, upload.fields([{ name: 'avatar', maxCount: 1 
 
     list.push(newGift);
     await writeGifts(list, `Add gift ${newGift.name} ${newGift.number}`);
+
+    broadcastNewGiftToSubscribers(newGift, list.length - 1).catch(() => {});
+
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Ошибка сохранения подарка' });
@@ -373,6 +489,7 @@ app.put('/api/gifts/:id', checkAdmin, upload.fields([{ name: 'avatar', maxCount:
       previewIsVideo = false;
     }
 
+    const isRes = body.reserved === 'true';
     list[idx] = {
       ...existing,
       name: (body.name || existing.name).trim(),
@@ -389,7 +506,8 @@ app.put('/api/gifts/:id', checkAdmin, upload.fields([{ name: 'avatar', maxCount:
       },
       subtitle: `Коллекционный подарок · модель ${model}`,
       description: (body.description ?? existing.description).trim(),
-      reserved: body.reserved === 'true',
+      reserved: isRes,
+      reservedUntil: isRes ? existing.reservedUntil : undefined,
       traits: {
         model: { name: model, chance: (body.modelChance || existing.traits.model.chance).trim() },
         pattern: { name: (body.pattern || existing.traits.pattern.name).trim(), chance: (body.patternChance || existing.traits.pattern.chance).trim() },
@@ -409,6 +527,10 @@ app.patch('/api/gifts/:id/reserve', checkAdmin, async (req, res) => {
   const item = list.find(g => g.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'Подарок не найден' });
   item.reserved = !item.reserved;
+  if (!item.reserved) {
+    delete item.reservedUntil;
+    delete item.reservedBy;
+  }
   await writeGifts(list, `Toggle reserve ${item.name} ${item.number}`);
   res.json(list);
 });
@@ -422,7 +544,7 @@ app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
 });
 
 /* ============================================================
-   TELEGRAM API ЧЕРЕЗ НАДЁЖНЫЙ IPv4 HTTPS + АДМИНКА В БОТЕ
+   TELEGRAM API ЧЕРЕЗ НАДЁЖНЫЙ IPv4 HTTPS + НОВЫЕ ФИЧИ БОТА
    ============================================================ */
 function tgApi(method, payload) {
   if (!BOT_TOKEN) return Promise.resolve(null);
@@ -544,7 +666,6 @@ function tgSendMultipart(method, fields, fileField, localFilePath) {
   });
 }
 
-// Скачивает файл из Telegram по file_id в папку data/uploads/ и пушит в GitHub
 async function downloadTelegramFile(fileId, fallbackExt = '.mp4') {
   const fileInfo = await tgApi('getFile', { file_id: fileId });
   if (!fileInfo || !fileInfo.ok || !fileInfo.result?.file_path) {
@@ -597,22 +718,27 @@ function resolveGiftLocalMedia(g) {
   return null;
 }
 
-// Состояние админки в Telegram (по chatId)
-const tgAdminAuth = new Set(); // авторизованные chatId
-const tgWizard = new Map(); // chatId -> { step, data }
+const tgAdminAuth = new Set(ENV_ADMIN_IDS);
+const tgWizard = new Map();
 
 function getMainMenuKeyboard(chatId) {
+  const state = readBotState();
+  const isSub = state.subscribers.includes(chatId);
   const rows = [];
+
   if (SITE_URL) {
     rows.push([{ text: 'Открыть GIFT MARKET (Mini App)', web_app: { url: SITE_URL } }]);
   }
   rows.push([{ text: 'Каталог подарков', callback_data: 'cat_0' }]);
   rows.push([
+    { text: isSub ? 'Уведомления о завозе: ВКЛ ✓' : 'Подписаться на завоз', callback_data: 'toggle_sub' }
+  ]);
+  rows.push([
     { text: 'Админ @n3yura', url: 'https://t.me/n3yura' },
     { text: 'Админ @NekosikN', url: 'https://t.me/NekosikN' }
   ]);
   if (tgAdminAuth.has(chatId)) {
-    rows.push([{ text: 'Панель админа (Добавить / Удалить)', callback_data: 'adm_panel' }]);
+    rows.push([{ text: 'Панель админа', callback_data: 'adm_panel' }]);
   }
   return { inline_keyboard: rows };
 }
@@ -622,14 +748,25 @@ function getAdminPanelKeyboard() {
     inline_keyboard: [
       [{ text: '＋ Добавить новый подарок', callback_data: 'adm_add' }],
       [{ text: 'Управление подарками (Бронь / Удалить)', callback_data: 'adm_manage' }],
+      [{ text: 'Статистика бота', callback_data: 'adm_stats' }],
       [{ text: 'В главное меню', callback_data: 'menu' }]
     ]
   };
 }
 
-function buildGiftCaption(g, index, total) {
-  const statusLine = g.reserved ? 'Статус: БРОНЬ' : 'Статус: В наличии (1 шт.)';
+function buildGiftCaption(g, index, total, prefixBanner = '') {
+  let statusLine = 'Статус: В наличии (1 шт.)';
+  if (g.reserved) {
+    if (g.reservedUntil) {
+      const minsLeft = Math.max(1, Math.ceil((Number(g.reservedUntil) - Date.now()) / 60000));
+      statusLine = `Статус: БРОНЬ (осталось ~${minsLeft} мин.)`;
+    } else {
+      statusLine = 'Статус: БРОНЬ';
+    }
+  }
+
   return [
+    prefixBanner,
     `<b>${g.name}</b> <code>${g.number}</code>  [${index + 1}/${total}]`,
     ``,
     `• <b>Модель:</b> ${g.model} (${g.traits?.model?.chance || '—'})`,
@@ -646,7 +783,6 @@ function buildGiftCaption(g, index, total) {
 function buildGiftKeyboard(g, index, total) {
   const prevIdx = (index - 1 + total) % total;
   const nextIdx = (index + 1) % total;
-  const orderText = encodeURIComponent(`Привет! Хочу купить: ${g.name} (${g.model} ${g.number}) — ${g.prices.TON} TON`);
 
   const rows = [
     [
@@ -658,8 +794,11 @@ function buildGiftKeyboard(g, index, total) {
 
   if (!g.reserved) {
     rows.push([
-      { text: 'Купить у @n3yura', url: `https://t.me/n3yura?text=${orderText}` },
-      { text: 'Купить у @NekosikN', url: `https://t.me/NekosikN?text=${orderText}` }
+      { text: 'Купить у @n3yura', callback_data: `buy_n3_${index}` },
+      { text: 'Купить у @NekosikN', callback_data: `buy_nk_${index}` }
+    ]);
+    rows.push([
+      { text: 'Забронировать на 15 мин', callback_data: `res15_${index}` }
     ]);
   }
 
@@ -671,14 +810,19 @@ function buildGiftKeyboard(g, index, total) {
   return { inline_keyboard: rows };
 }
 
-async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null) {
+async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null, prefixBanner = '', countAsView = true) {
   const list = readGifts();
   if (!list.length) {
     return tgApi('sendMessage', { chat_id: chatId, text: 'Каталог пока пуст.' });
   }
   const safeIdx = ((index % list.length) + list.length) % list.length;
   const g = list[safeIdx];
-  const caption = buildGiftCaption(g, safeIdx, list.length);
+
+  if (countAsView) {
+    trackGiftView(g.id);
+  }
+
+  const caption = buildGiftCaption(g, safeIdx, list.length, prefixBanner);
   const reply_markup = buildGiftKeyboard(g, safeIdx, list.length);
 
   if (oldMessageId) {
@@ -730,6 +874,41 @@ async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null) {
   }
 }
 
+/* === Уведомление строго для @yapp1kc, @NekosikN и @n3yura === */
+async function notifyAdmins(htmlText) {
+  const state = readBotState();
+  const recipients = Array.from(new Set(state.adminIds));
+  for (const adminId of recipients) {
+    await tgApi('sendMessage', {
+      chat_id: adminId,
+      text: htmlText,
+      parse_mode: 'HTML'
+    });
+  }
+}
+
+/* === Авторассылка подписчикам при появлении нового подарка === */
+async function broadcastNewGiftToSubscribers(gift, giftIndex, excludeChatId = null) {
+  const state = readBotState();
+  if (!state.subscribers.length) return 0;
+
+  let delivered = 0;
+  for (const subChatId of state.subscribers) {
+    if (excludeChatId && subChatId === excludeChatId) continue;
+    try {
+      await sendGiftCardWithAnimation(
+        subChatId,
+        giftIndex,
+        null,
+        '<b>НОВЫЙ ЗАВОЗ В GIFT MARKET!</b>\n',
+        false
+      );
+      delivered++;
+    } catch (e) {}
+  }
+  return delivered;
+}
+
 async function sendMainMenu(chatId, oldMessageId = null) {
   if (oldMessageId) {
     tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
@@ -777,6 +956,49 @@ async function sendAdminManageList(chatId, oldMessageId = null) {
   });
 }
 
+async function sendAdminStats(chatId, oldMessageId = null) {
+  if (oldMessageId) {
+    tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
+  }
+  const state = readBotState();
+  const list = readGifts();
+
+  const sortedGifts = [...list]
+    .map(g => ({
+      title: `${g.name} (${g.model} ${g.number})`,
+      views: Number(state.stats.viewsByGift[g.id] || 0)
+    }))
+    .sort((a, b) => b.views - a.views);
+
+  const topLines = sortedGifts.length
+    ? sortedGifts.map((item, i) => `${i + 1}. ${item.title} — <b>${item.views}</b> просм.`).join('\n')
+    : 'Пока нет данных о просмотрах.';
+
+  const text = [
+    `<b>Статистика бота GIFT MARKET</b>`,
+    ``,
+    `• Всего запускали бота: <b>${state.users.length}</b> чел.`,
+    `• Подписаны на завоз новинок: <b>${state.subscribers.length}</b> чел.`,
+    `• Нажатий «Купить»: <b>${state.stats.buyClicks}</b>`,
+    `• Броней на 15 минут: <b>${state.stats.reserveClicks}</b>`,
+    ``,
+    `<b>Популярность подарков:</b>`,
+    topLines
+  ].join('\n');
+
+  await tgApi('sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: 'Обновить статистику', callback_data: 'adm_stats' }],
+        [{ text: 'Назад в панель', callback_data: 'adm_panel' }]
+      ]
+    }
+  });
+}
+
 async function handleWizardInput(chatId, msg) {
   const state = tgWizard.get(chatId);
   if (!state) return false;
@@ -797,10 +1019,18 @@ async function handleWizardInput(chatId, msg) {
   if (state.step === 'password') {
     if (text === ADMIN_PASSWORD) {
       tgAdminAuth.add(chatId);
+      const cleanUser = String(msg.from?.username || '').replace(/^@/, '').trim().toLowerCase();
+      if (cleanUser && ALLOWED_NOTIFY_USERNAMES.has(cleanUser)) {
+        const botState = readBotState();
+        if (!botState.adminIds.includes(chatId)) {
+          botState.adminIds.push(chatId);
+          writeBotState(botState, true);
+        }
+      }
       tgWizard.delete(chatId);
       await tgApi('sendMessage', {
         chat_id: chatId,
-        text: '<b>Доступ в админ-панель разрешён.</b>\nТеперь ты можешь добавлять, бронировать и удалять подарки прямо отсюда.',
+        text: '<b>Доступ в админ-панель разрешён.</b>',
         parse_mode: 'HTML',
         reply_markup: getAdminPanelKeyboard()
       });
@@ -953,7 +1183,7 @@ async function handleWizardInput(chatId, msg) {
       return true;
     }
 
-    await tgApi('sendMessage', { chat_id: chatId, text: 'Сохраняю подарок на сайт и в бота...' });
+    await tgApi('sendMessage', { chat_id: chatId, text: 'Сохраняю подарок и отправляю уведомление подписчикам...' });
 
     try {
       const savedMedia = await downloadTelegramFile(fileId, fallbackExt);
@@ -989,13 +1219,15 @@ async function handleWizardInput(chatId, msg) {
       await writeGifts(list, `Add gift via TG bot: ${newGift.name} ${newGift.number}`);
       tgWizard.delete(chatId);
 
+      const notifiedCount = await broadcastNewGiftToSubscribers(newGift, list.length - 1, chatId);
+
       await tgApi('sendMessage', {
         chat_id: chatId,
-        text: `<b>Подарок опубликован в боте и на сайте!</b>\nID: <code>${newGift.id}</code>`,
+        text: `<b>Подарок опубликован в боте и на сайте!</b>\nID: <code>${newGift.id}</code>\nРассылка о завозе отправлена: <b>${notifiedCount}</b> подп.`,
         parse_mode: 'HTML'
       });
 
-      await sendGiftCardWithAnimation(chatId, list.length - 1);
+      await sendGiftCardWithAnimation(chatId, list.length - 1, null, '', false);
     } catch (err) {
       await tgApi('sendMessage', {
         chat_id: chatId,
@@ -1021,6 +1253,8 @@ app.post('/telegram/webhook', async (req, res) => {
     const chatId = msg.chat.id;
     const text = (msg.text || '').trim();
 
+    trackBotUser(chatId, msg.from?.username);
+
     if (text.startsWith('/start') || text.startsWith('/menu')) {
       tgWizard.delete(chatId);
       await sendMainMenu(chatId);
@@ -1028,7 +1262,9 @@ app.post('/telegram/webhook', async (req, res) => {
     }
 
     if (text.startsWith('/admin') || text.startsWith('/add')) {
-      if (tgAdminAuth.has(chatId)) {
+      const botState = readBotState();
+      if (tgAdminAuth.has(chatId) || botState.adminIds.includes(chatId)) {
+        tgAdminAuth.add(chatId);
         tgWizard.delete(chatId);
         await tgApi('sendMessage', {
           chat_id: chatId,
@@ -1063,6 +1299,115 @@ app.post('/telegram/webhook', async (req, res) => {
     const chatId = cb.message.chat.id;
     const msgId = cb.message.message_id;
     const data = cb.data || '';
+    const fromUser = cb.from || {};
+    const userTag = fromUser.username
+      ? `@${fromUser.username}`
+      : `<a href="tg://user?id=${fromUser.id}">${fromUser.first_name || 'Покупатель'}</a>`;
+
+    trackBotUser(chatId, fromUser.username);
+
+    // 1. Подписка / отписка на завоз новинок
+    if (data === 'toggle_sub') {
+      const state = readBotState();
+      const idx = state.subscribers.indexOf(chatId);
+      let subscribedNow = false;
+      if (idx === -1) {
+        state.subscribers.push(chatId);
+        subscribedNow = true;
+      } else {
+        state.subscribers.splice(idx, 1);
+      }
+      writeBotState(state, true);
+
+      await tgApi('answerCallbackQuery', {
+        callback_query_id: cb.id,
+        text: subscribedNow
+          ? 'Вы подписались на уведомления о новых подарках!'
+          : 'Уведомления о завозе отключены.',
+        show_alert: false
+      });
+
+      await tgApi('editMessageReplyMarkup', {
+        chat_id: chatId,
+        message_id: msgId,
+        reply_markup: getMainMenuKeyboard(chatId)
+      });
+      return;
+    }
+
+    // 2. Бронь на 15 минут покупателем
+    if (data.startsWith('res15_')) {
+      const idx = Number(data.replace('res15_', ''));
+      const list = readGifts();
+      const g = list[idx];
+      if (!g) {
+        await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Подарок не найден', show_alert: true });
+        return;
+      }
+      if (g.reserved) {
+        await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Этот подарок уже забронирован!', show_alert: true });
+        await sendGiftCardWithAnimation(chatId, idx, msgId, '', false);
+        return;
+      }
+
+      g.reserved = true;
+      g.reservedUntil = Date.now() + 15 * 60 * 1000;
+      g.reservedBy = fromUser.username ? `@${fromUser.username}` : String(fromUser.id);
+      await writeGifts(list, `15m reserve ${g.name} ${g.number} by ${g.reservedBy}`);
+
+      const state = readBotState();
+      state.stats.reserveClicks += 1;
+      writeBotState(state, false);
+
+      await tgApi('answerCallbackQuery', {
+        callback_query_id: cb.id,
+        text: 'Бронь на 15 минут поставлена! Напишите админу для завершения сделки.',
+        show_alert: true
+      });
+
+      await notifyAdmins(
+        `<b>Новая бронь на 15 минут!</b>\nПользователь ${userTag} поставил бронь на <b>${g.name} (${g.model}) ${g.number}</b>.\nЕсли не напишет за 15 минут — бронь снимется автоматически.`
+      );
+
+      await sendGiftCardWithAnimation(chatId, idx, msgId, '', false);
+      return;
+    }
+
+    // 3. Нажатие кнопок «Купить у @n3yura» / «Купить у @NekosikN»
+    if (data.startsWith('buy_n3_') || data.startsWith('buy_nk_')) {
+      const isN3 = data.startsWith('buy_n3_');
+      const idx = Number(data.replace(isN3 ? 'buy_n3_' : 'buy_nk_', ''));
+      const list = readGifts();
+      const g = list[idx];
+
+      const state = readBotState();
+      state.stats.buyClicks += 1;
+      writeBotState(state, false);
+
+      await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
+
+      if (g) {
+        const adminUsername = isN3 ? 'n3yura' : 'NekosikN';
+        const orderText = encodeURIComponent(`Привет! Хочу купить: ${g.name} (${g.model} ${g.number}) — ${g.prices.TON} TON`);
+        const directLink = `https://t.me/${adminUsername}?text=${orderText}`;
+
+        await notifyAdmins(
+          `<b>Интерес к покупке!</b>\nПользователь ${userTag} нажал «Купить у @${adminUsername}» на подарок <b>${g.name} (${g.model}) ${g.number}</b>.`
+        );
+
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: `Для покупки <b>${g.name} (${g.model}) ${g.number}</b> нажми кнопку ниже — откроется чат с @${adminUsername} с готовым текстом заказа:`,
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: `Перейти в чат с @${adminUsername} ↗`, url: directLink }]
+            ]
+          }
+        });
+      }
+      return;
+    }
 
     await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
 
@@ -1074,7 +1419,7 @@ app.post('/telegram/webhook', async (req, res) => {
 
     if (data.startsWith('cat_')) {
       const idx = Number(data.replace('cat_', '')) || 0;
-      await sendGiftCardWithAnimation(chatId, idx, msgId);
+      await sendGiftCardWithAnimation(chatId, idx, msgId, '', true);
       return;
     }
 
@@ -1088,18 +1433,19 @@ app.post('/telegram/webhook', async (req, res) => {
       return;
     }
 
-    // Проверка авторизации для всех кнопок adm_* (если сервер перезагрузился — попросит пароль)
     if (data.startsWith('adm_')) {
-      if (!tgAdminAuth.has(chatId)) {
+      const botState = readBotState();
+      if (!tgAdminAuth.has(chatId) && !botState.adminIds.includes(chatId)) {
         tgWizard.set(chatId, { step: 'password', data: {} });
         await tgApi('sendMessage', {
           chat_id: chatId,
-          text: 'Сессия админа истекла после перезапуска сервера. Введи <b>пароль администратора</b>:',
+          text: 'Введи <b>пароль администратора</b>:',
           parse_mode: 'HTML',
           reply_markup: { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] }
         });
         return;
       }
+      tgAdminAuth.add(chatId);
 
       if (data === 'adm_panel') {
         tgWizard.delete(chatId);
@@ -1119,11 +1465,17 @@ app.post('/telegram/webhook', async (req, res) => {
         });
       } else if (data === 'adm_manage') {
         await sendAdminManageList(chatId, msgId);
+      } else if (data === 'adm_stats') {
+        await sendAdminStats(chatId, msgId);
       } else if (data.startsWith('adm_tog_')) {
         const idx = Number(data.replace('adm_tog_', ''));
         const list = readGifts();
         if (!Number.isNaN(idx) && list[idx]) {
           list[idx].reserved = !list[idx].reserved;
+          if (!list[idx].reserved) {
+            delete list[idx].reservedUntil;
+            delete list[idx].reservedBy;
+          }
           await writeGifts(list, `Toggle reserve via TG bot: ${list[idx].name}`);
         }
         await sendAdminManageList(chatId, msgId);
@@ -1151,8 +1503,21 @@ async function setupWebhookWithRetry(attempt = 1) {
 }
 
 (async () => {
-  const remoteList = await githubFetchGifts();
-  if (!remoteList) readGifts();
+  const remoteGifts = await githubFetchJson('data/gifts.json');
+  if (Array.isArray(remoteGifts) && remoteGifts.length > 0) {
+    fs.writeFileSync(GIFTS_FILE, JSON.stringify(remoteGifts, null, 2), 'utf8');
+  } else {
+    readGifts();
+  }
+
+  const remoteState = await githubFetchJson('data/bot_state.json');
+  if (remoteState && typeof remoteState === 'object') {
+    fs.writeFileSync(BOT_STATE_FILE, JSON.stringify(remoteState, null, 2), 'utf8');
+    const st = readBotState();
+    st.adminIds.forEach(id => tgAdminAuth.add(id));
+  } else {
+    readBotState();
+  }
 
   app.listen(PORT, () => {
     console.log(`GIFT MARKET server running on port ${PORT}`);
