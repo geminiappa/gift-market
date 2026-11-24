@@ -16,7 +16,7 @@
     "subtitle": "Коллекционный подарок · модель Deadpoo",
     "description": "Happy Brownie #200 024 — коллекционный подарок в модели Deadpoo. Анимированная фигурка с оригинальной отделкой и яркими деталями.",
     "glow": "#424044",
-    "reserved": true,
+    "reserved": false,
     "traits": {
       "model": {
         "name": "Deadpoo",
@@ -30,9 +30,7 @@
         "name": "Battleship Grey",
         "chance": "1%"
       }
-    },
-    "reservedUntil": 1795540237298,
-    "reservedBy": "@fakeizz"
+    }
   },
   {
     "id": "rabbit",
