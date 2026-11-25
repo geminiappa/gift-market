@@ -1,38 +1,5 @@
 [
   {
-    "id": "kakashka",
-    "name": "Happy Brownie",
-    "number": "#200 024",
-    "model": "Deadpoo",
-    "file": "assets/gifts/deadpoo-60fps.webp",
-    "video": "assets/source/kakashka.mp4",
-    "previewIsVideo": true,
-    "sku": "#200 024",
-    "prices": {
-      "TON": 8,
-      "BYN": 27,
-      "STARS": 550
-    },
-    "subtitle": "Коллекционный подарок · модель Deadpoo",
-    "description": "Happy Brownie #200 024 — коллекционный подарок в модели Deadpoo. Анимированная фигурка с оригинальной отделкой и яркими деталями.",
-    "glow": "#424044",
-    "reserved": true,
-    "traits": {
-      "model": {
-        "name": "Deadpoo",
-        "chance": "2%"
-      },
-      "pattern": {
-        "name": "Pyramid",
-        "chance": "0.5%"
-      },
-      "backdrop": {
-        "name": "Battleship Grey",
-        "chance": "1%"
-      }
-    }
-  },
-  {
     "id": "tank",
     "name": "Pool Float",
     "number": "#52 138",
