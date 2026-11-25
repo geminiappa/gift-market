@@ -64,38 +64,5 @@
         "chance": "1.5%"
       }
     }
-  },
-  {
-    "id": "button",
-    "name": "Input Key",
-    "number": "#21 990",
-    "model": "Astrobot",
-    "file": "assets/gifts/astrobot-60fps.webp",
-    "video": "assets/source/button.mp4",
-    "previewIsVideo": true,
-    "sku": "#21 990",
-    "prices": {
-      "TON": 15,
-      "BYN": 50,
-      "STARS": 1150
-    },
-    "subtitle": "Коллекционный подарок · модель Astrobot",
-    "description": "Input Key #21 990 — модель Astrobot. Футуристичная клавиша с тёмным дисплеем и металлическим корпусом.",
-    "glow": "#3e4147",
-    "reserved": false,
-    "traits": {
-      "model": {
-        "name": "Astrobot",
-        "chance": "1.5%"
-      },
-      "pattern": {
-        "name": "Succubus",
-        "chance": "0.5%"
-      },
-      "backdrop": {
-        "name": "French Blue",
-        "chance": "1.5%"
-      }
-    }
   }
 ]
