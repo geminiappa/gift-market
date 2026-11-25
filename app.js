@@ -103,6 +103,7 @@ const DEFAULT_GIFTS = [
 
 let GIFTS = [...DEFAULT_GIFTS];
 let giftsLoadedFromServer = false;
+let REVIEWS = [];
 
 async function fetchServerGifts() {
   try {
@@ -121,6 +122,25 @@ async function fetchServerGifts() {
     }
   }
   giftsLoadedFromServer = true;
+  return false;
+}
+
+async function fetchServerReviews() {
+  try {
+    const res = await fetch('/api/reviews', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        REVIEWS = data;
+        localStorage.setItem('gmFallbackReviews', JSON.stringify(REVIEWS));
+        return true;
+      }
+    }
+  } catch (e) {}
+  const localRev = localStorage.getItem('gmFallbackReviews');
+  if (localRev) {
+    try { REVIEWS = JSON.parse(localRev); } catch (e) {}
+  }
   return false;
 }
 
@@ -274,6 +294,99 @@ function renderCatalog() {
     <div class="benefit"><span class="benefit-icon">02</span><div><b>Добавь в корзину</b><p>Собери один или несколько подарков.</p></div></div>
     <div class="benefit"><span class="benefit-icon">03</span><div><b>Оформи заявку</b><p>Оставь контакт для дальнейшей связи.</p></div></div>
   </section>`;
+}
+
+function renderReviews() {
+  const isAdm = Boolean(adminUnlocked && getAdminPassword());
+  const giftOptions = GIFTS.map(g =>
+    `<option value="${g.name} ${g.number}" data-price="${money(g.prices[currency], currency)}">${g.name} ${g.number} — ${money(g.prices[currency], currency)}</option>`
+  ).join('');
+
+  const cardsHtml = REVIEWS.length
+    ? REVIEWS.map(r => {
+        const stars = '★'.repeat(r.rating || 5) + '☆'.repeat(5 - (r.rating || 5));
+        const purchaseBadge = [r.giftTitle, r.priceLabel].filter(Boolean).join(' · ');
+        return `<article class="contact-card" style="display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <div>
+              <b>${r.author}</b>
+              <div style="font-size:11px;opacity:.65;margin-top:2px;">${r.createdAt || ''}</div>
+            </div>
+            <span style="letter-spacing:2px;font-size:13px;">${stars}</span>
+          </div>
+
+          ${purchaseBadge ? `<div style="font-size:12px;padding:7px 11px;border-radius:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);">
+            Покупка: <b>${purchaseBadge}</b>
+          </div>` : ''}
+
+          <p style="margin:0;font-size:13px;line-height:1.6;">${r.comment}</p>
+
+          ${r.reply ? `<div style="padding:11px 13px;border-radius:10px;background:rgba(255,255,255,0.04);border-left:2px solid #fff;font-size:12.5px;line-height:1.5;">
+            <div style="font-size:10.5px;opacity:.7;margin-bottom:4px;">Ответ админа ${r.replyBy ? `(${r.replyBy})` : ''}:</div>
+            <div>${r.reply}</div>
+          </div>` : ''}
+
+          ${isAdm ? `<form class="admin-review-reply-form" data-review-id="${r.id}" style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;">
+            <input type="text" name="reply" placeholder="Написать ответ от админа..." value="${(r.reply || '').replace(/"/g, '&quot;')}" style="flex:1;min-width:180px;padding:9px 11px;border-radius:8px;border:1px solid #404146;background:#1b1c20;color:#fff;font-size:12px;">
+            <button type="submit" class="button button-dark" style="padding:9px 14px;font-size:12px;">Ответить</button>
+          </form>` : ''}
+        </article>`;
+      }).join('')
+    : `<div class="contact-card"><p>Отзывов пока нет — будь первым, кто оставит отзыв после покупки.</p></div>`;
+
+  return `<section class="page-intro">
+    <div>
+      <div class="eyebrow">CUSTOMER FEEDBACK</div>
+      <h1>Отзывы <span>покупателей.</span></h1>
+    </div>
+    <p>Отзывы с указанием подарка и суммы покупки, а также ответы администрации.</p>
+  </section>
+
+  <div class="admin-builder-grid">
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      ${cardsHtml}
+    </div>
+
+    <form class="contact-form" id="addReviewForm">
+      <div class="eyebrow">NEW REVIEW</div>
+      <h3 style="font-size:19px;margin:10px 0 18px;">Оставить отзыв</h3>
+      <div class="form-grid">
+        <div class="field full">
+          <label>ВАШ @USERNAME ИЛИ ИМЯ *</label>
+          <input type="text" name="author" required placeholder="@username или имя">
+        </div>
+        <div class="field full">
+          <label>КУПЛЕННЫЙ ПОДАРОК И ЦЕНА</label>
+          <select id="revGiftSelect" style="width:100%;border:1px solid #404146;border-radius:7px;padding:11px;background:#232427;color:#eee;font-size:12px;">
+            <option value="">Выбрать подарок из каталога...</option>
+            ${giftOptions}
+            <option value="CUSTOM">Указать вручную</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>ПОДАРОК</label>
+          <input type="text" name="giftTitle" id="revGiftTitle" placeholder="Например: Pool Float #110 493">
+        </div>
+        <div class="field">
+          <label>ЗА СКОЛЬКО (ЦЕНА)</label>
+          <input type="text" name="priceLabel" id="revPriceLabel" placeholder="Например: 8 TON">
+        </div>
+        <div class="field full">
+          <label>ОЦЕНКА</label>
+          <select name="rating" style="width:100%;border:1px solid #404146;border-radius:7px;padding:11px;background:#232427;color:#eee;font-size:12px;">
+            <option value="5">★★★★★ (5 из 5)</option>
+            <option value="4">★★★★☆ (4 из 5)</option>
+            <option value="3">★★★☆☆ (3 из 5)</option>
+          </select>
+        </div>
+        <div class="field full">
+          <label>ТЕКСТ ОТЗЫВА *</label>
+          <textarea name="comment" required placeholder="Как прошла сделка, всё ли понравилось?"></textarea>
+        </div>
+      </div>
+      <button class="button button-light button-full" type="submit" style="margin-top:14px;">Опубликовать отзыв <span>↗</span></button>
+    </form>
+  </div>`;
 }
 
 function renderAbout() {
@@ -740,7 +853,7 @@ function renderGift(id) {
 function currentRoute() {
   const params = new URLSearchParams(location.search);
   const queryPage = params.get('page');
-  if (queryPage === 'privacy' || queryPage === 'terms') {
+  if (queryPage === 'privacy' || queryPage === 'terms' || queryPage === 'reviews') {
     return { page: queryPage };
   }
 
@@ -752,6 +865,7 @@ function currentRoute() {
   const hash = location.hash.replace(/^#/, '');
   if (hash.startsWith('privacy')) return { page: 'privacy' };
   if (hash.startsWith('terms')) return { page: 'terms' };
+  if (hash.startsWith('reviews')) return { page: 'reviews' };
 
   if (hash && !hash.startsWith('tgWebApp')) {
     if (hash.startsWith('gift/')) {
@@ -768,6 +882,7 @@ function render() {
   const pages = {
     home: renderHome,
     catalog: renderCatalog,
+    reviews: renderReviews,
     about: renderAbout,
     faq: renderFaq,
     contacts: renderContacts,
@@ -987,6 +1102,84 @@ function initLegalConsentPopup() {
   if (openTermsLink) openTermsLink.addEventListener('click', closeAndAccept);
 }
 
+function initCurrencyCalculator() {
+  const bynInput = document.getElementById('calcByn');
+  const tonInput = document.getElementById('calcTon');
+  const starsInput = document.getElementById('calcStars');
+  const infoEl = document.getElementById('calcRatesInfo');
+  if (!bynInput || !tonInput || !starsInput) return;
+
+  const STAR_USD_FRAGMENT = 0.015;
+  let tonUsd = 0.97;
+  let bynPerUsd = 2.99;
+
+  function updateInfoLabel() {
+    if (!infoEl) return;
+    const starsPerTon = tonUsd > 0 ? Math.round(tonUsd / STAR_USD_FRAGMENT) : 0;
+    infoEl.textContent = `1 TON ≈ $${tonUsd.toFixed(2)} · 1 USD ≈ ${bynPerUsd.toFixed(2)} BYN · 1 TON ≈ ${starsPerTon} Stars`;
+  }
+
+  function formatNum(val, decimals = 2) {
+    if (!Number.isFinite(val) || val <= 0) return '';
+    return Number(val.toFixed(decimals)).toString();
+  }
+
+  function recalcFrom(source) {
+    if (source === 'byn') {
+      const byn = parseFloat(bynInput.value);
+      if (!Number.isFinite(byn) || byn <= 0) {
+        tonInput.value = '';
+        starsInput.value = '';
+        return;
+      }
+      const usd = byn / bynPerUsd;
+      tonInput.value = formatNum(usd / tonUsd, 4);
+      starsInput.value = String(Math.round(usd / STAR_USD_FRAGMENT));
+    } else if (source === 'ton') {
+      const ton = parseFloat(tonInput.value);
+      if (!Number.isFinite(ton) || ton <= 0) {
+        bynInput.value = '';
+        starsInput.value = '';
+        return;
+      }
+      const usd = ton * tonUsd;
+      bynInput.value = formatNum(usd * bynPerUsd, 2);
+      starsInput.value = String(Math.round(usd / STAR_USD_FRAGMENT));
+    } else if (source === 'stars') {
+      const stars = parseFloat(starsInput.value);
+      if (!Number.isFinite(stars) || stars <= 0) {
+        bynInput.value = '';
+        tonInput.value = '';
+        return;
+      }
+      const usd = stars * STAR_USD_FRAGMENT;
+      bynInput.value = formatNum(usd * bynPerUsd, 2);
+      tonInput.value = formatNum(usd / tonUsd, 4);
+    }
+  }
+
+  bynInput.addEventListener('input', () => recalcFrom('byn'));
+  tonInput.addEventListener('input', () => recalcFrom('ton'));
+  starsInput.addEventListener('input', () => recalcFrom('stars'));
+
+  updateInfoLabel();
+
+  Promise.allSettled([
+    fetch('https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd').then(r => r.ok ? r.json() : null),
+    fetch('https://open.er-api.com/v6/latest/USD').then(r => r.ok ? r.json() : null)
+  ]).then(([tonRes, fxRes]) => {
+    const fetchedTon = tonRes.status === 'fulfilled' ? tonRes.value?.['the-open-network']?.usd : null;
+    if (typeof fetchedTon === 'number' && fetchedTon > 0) tonUsd = fetchedTon;
+    const fetchedByn = fxRes.status === 'fulfilled' ? fxRes.value?.rates?.BYN : null;
+    if (typeof fetchedByn === 'number' && fetchedByn > 0) bynPerUsd = fetchedByn;
+    updateInfoLabel();
+
+    if (bynInput.value) recalcFrom('byn');
+    else if (tonInput.value) recalcFrom('ton');
+    else if (starsInput.value) recalcFrom('stars');
+  });
+}
+
 app.addEventListener('click', e => {
   const add = e.target.closest('[data-add]');
   if (add) {
@@ -1035,6 +1228,15 @@ app.addEventListener('change', e => {
     $('#cartCurrency').value = currency;
     renderCart();
   }
+  if (e.target.id === 'revGiftSelect') {
+    const opt = e.target.options[e.target.selectedIndex];
+    const titleEl = $('#revGiftTitle');
+    const priceEl = $('#revPriceLabel');
+    if (e.target.value && e.target.value !== 'CUSTOM' && titleEl && priceEl) {
+      titleEl.value = e.target.value;
+      priceEl.value = opt?.dataset?.price || '';
+    }
+  }
 });
 
 app.addEventListener('click', e => {
@@ -1048,6 +1250,64 @@ app.addEventListener('click', e => {
   }
   const faq = e.target.closest('.faq-question');
   if (faq) faq.parentElement.classList.toggle('open');
+});
+
+app.addEventListener('submit', async e => {
+  if (e.target.id === 'addReviewForm') {
+    e.preventDefault();
+    const form = e.target;
+    const payload = {
+      author: form.author.value.trim(),
+      giftTitle: form.giftTitle.value.trim(),
+      priceLabel: form.priceLabel.value.trim(),
+      rating: Number(form.rating.value || 5),
+      comment: form.comment.value.trim()
+    };
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('Ошибка отправки');
+      REVIEWS = await res.json();
+      localStorage.setItem('gmFallbackReviews', JSON.stringify(REVIEWS));
+      form.reset();
+      render();
+      showToast('Отзыв опубликован!');
+    } catch (err) {
+      showToast('Не удалось опубликовать отзыв');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+    return;
+  }
+
+  const replyForm = e.target.closest('.admin-review-reply-form');
+  if (replyForm) {
+    e.preventDefault();
+    const reviewId = replyForm.dataset.reviewId;
+    const replyText = replyForm.reply.value.trim();
+    try {
+      const res = await fetch(`/api/reviews/${encodeURIComponent(reviewId)}/reply`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-password': getAdminPassword()
+        },
+        body: JSON.stringify({ reply: replyText, replyBy: 'Админ' })
+      });
+      if (!res.ok) throw new Error('Ошибка ответа');
+      REVIEWS = await res.json();
+      localStorage.setItem('gmFallbackReviews', JSON.stringify(REVIEWS));
+      render();
+      showToast('Ответ сохранён!');
+    } catch (err) {
+      showToast('Не удалось сохранить ответ');
+    }
+  }
 });
 
 $('#openCart').addEventListener('click', openCart);
@@ -1362,9 +1622,10 @@ app.addEventListener('submit', async e => {
 render();
 renderCart();
 initLegalConsentPopup();
+initCurrencyCalculator();
 
 (async function syncGiftsFromServerOnStart() {
-  await fetchServerGifts();
+  await Promise.all([fetchServerGifts(), fetchServerReviews()]);
   cart = cart.filter(line => {
     const g = getGift(line.id);
     return g && !g.reserved;
