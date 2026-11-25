@@ -21,6 +21,7 @@
     <nav class="main-nav" aria-label="Основная навигация">
       <a href="#home" data-nav="home">Главная</a>
       <a href="#catalog" data-nav="catalog">Каталог</a>
+      <a href="#reviews" data-nav="reviews">Отзывы</a>
       <a href="#about" data-nav="about">О магазине</a>
       <a href="#faq" data-nav="faq">FAQ</a>
       <a href="#contacts" data-nav="contacts">Контакты</a>
@@ -32,10 +33,46 @@
   </header>
 
   <nav class="mobile-nav" id="mobileNav" aria-label="Мобильная навигация">
-    <a href="#home" data-nav="home">Главная</a><a href="#catalog" data-nav="catalog">Каталог</a><a href="#about" data-nav="about">О магазине</a><a href="#faq" data-nav="faq">FAQ</a><a href="#contacts" data-nav="contacts">Контакты</a>
+    <a href="#home" data-nav="home">Главная</a>
+    <a href="#catalog" data-nav="catalog">Каталог</a>
+    <a href="#reviews" data-nav="reviews">Отзывы</a>
+    <a href="#about" data-nav="about">О магазине</a>
+    <a href="#faq" data-nav="faq">FAQ</a>
+    <a href="#contacts" data-nav="contacts">Контакты</a>
   </nav>
 
   <main id="app" class="page-shell" aria-live="polite"></main>
+
+  <section class="page-shell" id="currencyCalcSection" style="padding-top:0;padding-bottom:36px;">
+    <div class="contact-card" style="max-width:760px;margin:0 auto;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+        <div>
+          <div class="eyebrow">LIVE CONVERTER · FRAGMENT & MARKET</div>
+          <h3 style="margin:6px 0 0;">Калькулятор валют</h3>
+        </div>
+        <span id="calcRatesInfo" style="font-size:11px;opacity:.7;">Загрузка курсов...</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+        <div class="field">
+          <label for="calcByn">BYN (БЕЛ. РУБЛИ)</label>
+          <input type="number" id="calcByn" step="any" min="0" placeholder="Например: 5">
+        </div>
+        <div class="field">
+          <label for="calcTon">TON (TONCOIN)</label>
+          <input type="number" id="calcTon" step="any" min="0" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label for="calcStars">STARS (КУРС FRAGMENT)</label>
+          <input type="number" id="calcStars" step="1" min="0" placeholder="0">
+        </div>
+      </div>
+
+      <p class="tiny-note" style="margin-top:12px;">
+        Введи значение в любое поле (например, <b>5</b> в BYN) — остальные пересчитаются автоматически. Расчёт Stars ведётся по ориентиру Fragment (~$0.015 / Star) и актуальному курсу TON.
+      </p>
+    </div>
+  </section>
 
   <footer class="site-footer">
     <div class="footer-main">
@@ -46,6 +83,7 @@
       <p>Цифровые подарки.<br><span>Минимализм в каждой детали.</span></p>
       <div class="footer-links">
         <a href="#catalog">Каталог</a>
+        <a href="#reviews">Отзывы</a>
         <a href="#contacts">Контакты</a>
         <a href="#privacy">Политика конфиденциальности</a>
         <a href="#terms">Пользовательское соглашение</a>
@@ -66,7 +104,6 @@
     <div class="modal-card"><button class="close-button modal-x" id="closeModal" aria-label="Закрыть">×</button><div id="modalContent"></div></div>
   </div>
 
-  <!-- Табличка ознакомления с политикой и соглашением при первом заходе -->
   <div class="modal-layer" id="legalConsentModal" role="dialog" aria-modal="true" aria-hidden="true" style="z-index:9999;">
     <div class="modal-card" style="max-width:440px;">
       <div class="eyebrow" style="margin-bottom:8px;">ПРАВИЛА СЕРВИСА · G1FT MARKET</div>
@@ -82,15 +119,12 @@
     </div>
   </div>
 
-  <!-- Модальное окно просмотра NFT-подарка с видео и шансами из Telegram (без дублирования текста) -->
   <div id="tg-gift-modal" class="tg-modal-overlay" onclick="closeTgGiftModal()">
     <div class="tg-modal-card" onclick="event.stopPropagation()">
       <button class="tg-modal-close" onclick="closeTgGiftModal()" aria-label="Закрыть">×</button>
-      
       <div id="tg-modal-preview" class="tg-modal-preview">
         <video id="tg-modal-video" class="tg-modal-video" autoplay loop muted playsinline></video>
       </div>
-
       <div class="tg-modal-body">
         <div class="tg-traits-table">
           <div class="tg-trait-row">
@@ -115,13 +149,12 @@
             </div>
           </div>
         </div>
-
         <button id="tg-modal-cart-btn" class="button button-light button-full">Добавить в корзину <span>＋</span></button>
       </div>
     </div>
   </div>
 
   <div class="toast" id="toast"></div>
-<script src="app.js?v=50"></script>
+<script src="app.js?v=52"></script>
 </body>
 </html>
