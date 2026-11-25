@@ -110,7 +110,7 @@ async function fetchServerGifts() {
     const res = await fetch('/api/gifts', { cache: 'no-store' });
     if (!res.ok) throw new Error('API unavailable');
     const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) {
+    if (Array.isArray(data)) {
       GIFTS = data;
       giftsLoadedFromServer = true;
       return true;
@@ -1542,22 +1542,39 @@ app.addEventListener('click', async e => {
 
   const delBtn = e.target.closest('[data-delete-gift]');
   if (delBtn) {
-    const id = delBtn.dataset.deleteGift;
-    if (editingGiftId === id) editingGiftId = null;
+    const id = String(delBtn.dataset.deleteGift || '');
+    if (!id) {
+      showToast('Не удалось определить ID подарка');
+      return;
+    }
+    if (!confirm('Точно удалить этот подарок из каталога для всех пользователей?')) return;
+
+    delBtn.disabled = true;
+    delBtn.textContent = '…';
     try {
       const res = await fetch(`/api/gifts/${encodeURIComponent(id)}`, {
         method: 'DELETE',
+        cache: 'no-store',
         headers: { 'x-admin-password': getAdminPassword() }
       });
-      if (!res.ok) throw new Error('Ошибка удаления');
-      GIFTS = await res.json();
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(result.error || `Сервер вернул ошибку ${res.status}`);
+      }
+      if (!Array.isArray(result)) throw new Error('Сервер вернул некорректный список подарков');
+
+      GIFTS = result;
+      editingGiftId = null;
       cart = cart.filter(line => line.id !== id);
       saveCart();
       renderCart();
       render();
-      showToast('Подарок удалён для всех пользователей');
+      showToast('Подарок удалён из каталога');
     } catch (err) {
-      showToast('Не удалось удалить подарок');
+      console.error('Gift deletion failed:', err);
+      showToast('Ошибка удаления: ' + (err.message || 'неизвестная ошибка'));
+      delBtn.disabled = false;
+      delBtn.textContent = '×';
     }
     return;
   }

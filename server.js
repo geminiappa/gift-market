@@ -577,15 +577,26 @@ app.patch('/api/gifts/:id/reserve', checkAdmin, async (req, res) => {
 
 app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
   try {
-    const reqId = decodeURIComponent(String(req.params.id || '')).trim();
-    let list = readGifts();
-    const target = list.find(g => String(g.id) === reqId);
-    if (!target) return res.status(404).json({ error: 'Подарок не найден' });
-    list = list.filter(g => String(g.id) !== reqId);
-    await writeGifts(list, `Delete gift ${target.name} ${target.number}`);
-    res.json(list);
+    // Express уже декодирует req.params.id. Повторный decodeURIComponent
+    // мог ломать удаление ID со спецсимволами.
+    const giftId = String(req.params.id || '').trim();
+    if (!giftId) return res.status(400).json({ error: 'Не указан ID подарка' });
+
+    const current = readGifts();
+    const target = current.find(g => String(g.id) === giftId);
+    if (!target) {
+      return res.status(404).json({ error: `Подарок с ID «${giftId}» не найден` });
+    }
+
+    const updated = current.filter(g => String(g.id) !== giftId);
+    await writeGifts(updated, `Delete gift ${target.name} ${target.number}`);
+
+    // Возвращаем именно сохранённый список, чтобы сайт сразу обновил каталог.
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Ошибка удаления подарка' });
+    console.error('[DELETE /api/gifts/:id]', err);
+    return res.status(500).json({ error: err.message || 'Ошибка удаления подарка' });
   }
 });
 
