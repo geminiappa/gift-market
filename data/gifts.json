@@ -33,39 +33,6 @@
     }
   },
   {
-    "id": "rabbit",
-    "name": "Pool Float",
-    "number": "#110 493",
-    "model": "Air Bunny",
-    "file": "assets/gifts/air-bunny-60fps.webp",
-    "video": "assets/source/rabbit.mp4",
-    "previewIsVideo": true,
-    "sku": "#110 493",
-    "prices": {
-      "TON": 8,
-      "BYN": 27,
-      "STARS": 550
-    },
-    "subtitle": "Коллекционный подарок · модель Air Bunny",
-    "description": "Pool Float #110 493 — модель Air Bunny. Белый надувной круг с кроликом и морковкой, представленный в виде оригинальной анимации.",
-    "glow": "#414448",
-    "reserved": true,
-    "traits": {
-      "model": {
-        "name": "Air Bunny",
-        "chance": "3%"
-      },
-      "pattern": {
-        "name": "Carrot",
-        "chance": "0.5%"
-      },
-      "backdrop": {
-        "name": "Sapphire",
-        "chance": "1.5%"
-      }
-    }
-  },
-  {
     "id": "tank",
     "name": "Pool Float",
     "number": "#52 138",
