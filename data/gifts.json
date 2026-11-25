@@ -49,7 +49,7 @@
     "subtitle": "Коллекционный подарок · модель Air Bunny",
     "description": "Pool Float #110 493 — модель Air Bunny. Белый надувной круг с кроликом и морковкой, представленный в виде оригинальной анимации.",
     "glow": "#414448",
-    "reserved": false,
+    "reserved": true,
     "traits": {
       "model": {
         "name": "Air Bunny",
