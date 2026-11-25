@@ -16,7 +16,6 @@ const ENV_ADMIN_IDS = (process.env.ADMIN_CHAT_IDS || '')
   .map(s => Number(s.trim()))
   .filter(n => !Number.isNaN(n) && n !== 0);
 
-// Белый список юзернеймов, которым приходят уведомления о бронях и покупках
 const ALLOWED_NOTIFY_USERNAMES = new Set(['yapp1kc', 'nekosikn', 'n3yura']);
 
 // GitHub Persistence
@@ -29,6 +28,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const GIFTS_FILE = path.join(DATA_DIR, 'gifts.json');
 const BOT_STATE_FILE = path.join(DATA_DIR, 'bot_state.json');
+const REVIEWS_FILE = path.join(DATA_DIR, 'reviews.json');
 
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
@@ -132,6 +132,20 @@ const DEFAULT_GIFTS = [
       pattern: { name: 'Succubus', chance: '0.5%' },
       backdrop: { name: 'French Blue', chance: '1.5%' }
     }
+  }
+];
+
+const DEFAULT_REVIEWS = [
+  {
+    id: 'rev_1',
+    author: '@buyer_example',
+    rating: 5,
+    giftTitle: 'Pool Float · Air Bunny #110 493',
+    priceLabel: '8 TON',
+    comment: 'Взял подарок, всё прошло чётко и без задержек.',
+    reply: 'Спасибо за отзыв! Всегда рады видеть в GIFT MARKET.',
+    replyBy: '@n3yura',
+    createdAt: '2026-11-25'
   }
 ];
 
@@ -280,17 +294,40 @@ function trackGiftView(giftId) {
   writeBotState(state, false);
 }
 
-/* === Каталог подарков + автоматическое снятие 15-минутной брони === */
+/* === Отзывы покупателей === */
+function readReviews() {
+  if (!fs.existsSync(REVIEWS_FILE)) {
+    fs.writeFileSync(REVIEWS_FILE, JSON.stringify(DEFAULT_REVIEWS, null, 2), 'utf8');
+    return [...DEFAULT_REVIEWS];
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(REVIEWS_FILE, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [...DEFAULT_REVIEWS];
+  } catch (e) {
+    return [...DEFAULT_REVIEWS];
+  }
+}
+
+async function writeReviews(list, commitMsg = 'Update reviews') {
+  const jsonStr = JSON.stringify(list, null, 2);
+  fs.writeFileSync(REVIEWS_FILE, jsonStr, 'utf8');
+  if (GITHUB_TOKEN && GITHUB_REPO) {
+    await githubPutFile('data/reviews.json', Buffer.from(jsonStr, 'utf8'), commitMsg);
+  }
+}
+
+/* === Каталог подарков (важно: пустой массив [] НЕ сбрасывается на DEFAULT_GIFTS) === */
 function readGifts() {
   let list;
   if (!fs.existsSync(GIFTS_FILE)) {
     fs.writeFileSync(GIFTS_FILE, JSON.stringify(DEFAULT_GIFTS, null, 2), 'utf8');
-    list = DEFAULT_GIFTS;
+    list = [...DEFAULT_GIFTS];
   } else {
     try {
-      list = JSON.parse(fs.readFileSync(GIFTS_FILE, 'utf8'));
+      const parsed = JSON.parse(fs.readFileSync(GIFTS_FILE, 'utf8'));
+      list = Array.isArray(parsed) ? parsed : [...DEFAULT_GIFTS];
     } catch (e) {
-      list = DEFAULT_GIFTS;
+      list = [...DEFAULT_GIFTS];
     }
   }
 
@@ -352,6 +389,10 @@ const upload = multer({
 });
 
 app.use(express.json());
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  next();
+});
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 app.get('/uploads/:filename', async (req, res) => {
@@ -379,7 +420,6 @@ app.get('/uploads/:filename', async (req, res) => {
   res.status(404).send('File not found');
 });
 
-app.use(express.static(__dirname));
 app.get('/ping', (req, res) => res.status(200).send('OK'));
 
 function checkAdmin(req, res, next) {
@@ -536,12 +576,62 @@ app.patch('/api/gifts/:id/reserve', checkAdmin, async (req, res) => {
 });
 
 app.delete('/api/gifts/:id', checkAdmin, async (req, res) => {
-  let list = readGifts();
-  const target = list.find(g => g.id === req.params.id);
-  list = list.filter(g => g.id !== req.params.id);
-  await writeGifts(list, `Delete gift ${target ? target.name : req.params.id}`);
+  try {
+    const reqId = decodeURIComponent(String(req.params.id || '')).trim();
+    let list = readGifts();
+    const target = list.find(g => String(g.id) === reqId);
+    if (!target) return res.status(404).json({ error: 'Подарок не найден' });
+    list = list.filter(g => String(g.id) !== reqId);
+    await writeGifts(list, `Delete gift ${target.name} ${target.number}`);
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Ошибка удаления подарка' });
+  }
+});
+
+/* === API Отзывов === */
+app.get('/api/reviews', (req, res) => {
+  res.json(readReviews());
+});
+
+app.post('/api/reviews', async (req, res) => {
+  const { author, rating, giftTitle, priceLabel, comment } = req.body || {};
+  const cleanComment = String(comment || '').trim();
+  if (!cleanComment) {
+    return res.status(400).json({ error: 'Введите текст отзыва' });
+  }
+
+  const list = readReviews();
+  list.unshift({
+    id: `rev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    author: String(author || 'Покупатель').trim().slice(0, 64),
+    rating: Math.min(5, Math.max(1, Number(rating) || 5)),
+    giftTitle: String(giftTitle || '').trim().slice(0, 120),
+    priceLabel: String(priceLabel || '').trim().slice(0, 40),
+    comment: cleanComment.slice(0, 1200),
+    reply: '',
+    replyBy: '',
+    createdAt: new Date().toISOString().slice(0, 10)
+  });
+
+  await writeReviews(list, 'Add new review');
+  res.status(201).json(list);
+});
+
+app.post('/api/reviews/:id/reply', checkAdmin, async (req, res) => {
+  const replyText = String(req.body?.reply || '').trim();
+  const replyBy = String(req.body?.replyBy || 'Админ').trim().slice(0, 50);
+  const list = readReviews();
+  const idx = list.findIndex(r => r.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Отзыв не найден' });
+
+  list[idx].reply = replyText;
+  list[idx].replyBy = replyText ? replyBy : '';
+  await writeReviews(list, `Reply to review ${req.params.id}`);
   res.json(list);
 });
+
+app.use(express.static(__dirname));
 
 /* ============================================================
    TELEGRAM API ЧЕРЕЗ НАДЁЖНЫЙ IPv4 HTTPS + ПОЛНЫЙ ФУНКЦИОНАЛ БОТА
@@ -730,6 +820,11 @@ function extractTelegramMediaFromMessage(msg) {
 const tgAdminAuth = new Set(ENV_ADMIN_IDS);
 const tgWizard = new Map();
 
+function isBotAdmin(chatId) {
+  const botState = readBotState();
+  return tgAdminAuth.has(chatId) || botState.adminIds.includes(chatId);
+}
+
 function getMainMenuKeyboard(chatId) {
   const state = readBotState();
   const isSub = state.subscribers.includes(chatId);
@@ -738,7 +833,10 @@ function getMainMenuKeyboard(chatId) {
   if (SITE_URL) {
     rows.push([{ text: 'Открыть GIFT MARKET (Mini App)', web_app: { url: SITE_URL } }]);
   }
-  rows.push([{ text: 'Каталог подарков', callback_data: 'cat_0' }]);
+  rows.push([
+    { text: 'Каталог подарков', callback_data: 'cat_0' },
+    { text: 'Отзывы покупателей', callback_data: 'rev_0' }
+  ]);
   rows.push([
     { text: isSub ? 'Уведомления о завозе: ВКЛ ✓' : 'Подписаться на завоз', callback_data: 'toggle_sub' }
   ]);
@@ -757,7 +855,6 @@ function getMainMenuKeyboard(chatId) {
   }
   return { inline_keyboard: rows };
 }
-
 
 function getAdminPanelKeyboard() {
   return {
@@ -896,6 +993,79 @@ async function sendGiftCardWithAnimation(chatId, index, oldMessageId = null, pre
       reply_markup
     });
   }
+}
+
+function formatReviewMessage(r, index, total) {
+  const stars = '★'.repeat(r.rating || 5) + '☆'.repeat(5 - (r.rating || 5));
+  const purchase = [r.giftTitle, r.priceLabel].filter(Boolean).join(' · ');
+  const lines = [
+    `<b>Отзывы покупателей</b> [${index + 1}/${total}]`,
+    `Автор: <b>${r.author}</b> · ${stars}`,
+    purchase ? `Покупка: <b>${purchase}</b>` : null,
+    `Дата: <code>${r.createdAt || ''}</code>`,
+    ``,
+    `«${r.comment}»`
+  ];
+  if (r.reply) {
+    lines.push(`\n💬 <b>Ответ админа (${r.replyBy || 'Админ'}):</b>\n${r.reply}`);
+  }
+  return lines.filter(Boolean).join('\n');
+}
+
+function buildReviewKeyboard(chatId, list, index) {
+  const current = list[index];
+  const prevIdx = (index - 1 + list.length) % list.length;
+  const nextIdx = (index + 1) % list.length;
+  const rows = [];
+
+  if (list.length > 1) {
+    rows.push([
+      { text: '◀ Пред.', callback_data: `rev_${prevIdx}` },
+      { text: `${index + 1} / ${list.length}`, callback_data: 'noop' },
+      { text: 'След. ▶', callback_data: `rev_${nextIdx}` }
+    ]);
+  }
+
+  rows.push([{ text: '✍️ Оставить отзыв', callback_data: 'rev_write' }]);
+
+  if (isBotAdmin(chatId) && current) {
+    rows.push([{ text: '💬 Ответить на отзыв', callback_data: `rev_reply_${current.id}` }]);
+  }
+
+  if (SITE_URL) {
+    rows.push([{ text: 'Открыть отзывы на сайте', web_app: { url: `${SITE_URL}/?page=reviews` } }]);
+  }
+
+  rows.push([{ text: 'В главное меню', callback_data: 'menu' }]);
+  return { inline_keyboard: rows };
+}
+
+async function sendReviewCard(chatId, index, oldMessageId = null) {
+  const list = readReviews();
+  if (oldMessageId) {
+    tgApi('deleteMessage', { chat_id: chatId, message_id: oldMessageId }).catch(() => {});
+  }
+
+  if (!list.length) {
+    return tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Отзывов пока нет. Нажми «Оставить отзыв», чтобы добавить первый!',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '✍️ Оставить отзыв', callback_data: 'rev_write' }],
+          [{ text: 'В главное меню', callback_data: 'menu' }]
+        ]
+      }
+    });
+  }
+
+  const safeIdx = ((index % list.length) + list.length) % list.length;
+  return tgApi('sendMessage', {
+    chat_id: chatId,
+    text: formatReviewMessage(list[safeIdx], safeIdx, list.length),
+    parse_mode: 'HTML',
+    reply_markup: buildReviewKeyboard(chatId, list, safeIdx)
+  });
 }
 
 async function notifyAdmins(htmlText) {
@@ -1105,12 +1275,81 @@ async function handleWizardInput(chatId, msg) {
     await tgApi('sendMessage', {
       chat_id: chatId,
       text: 'Действие отменено.',
-      reply_markup: getAdminPanelKeyboard()
+      reply_markup: tgAdminAuth.has(chatId) ? getAdminPanelKeyboard() : getMainMenuKeyboard(chatId)
     });
     return true;
   }
 
   const cancelKb = { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] };
+
+  if (state.step === 'rev_custom_meta') {
+    if (!text) return true;
+    const [giftTitle, priceLabel] = text.split('|').map(s => s.trim());
+    state.data.giftTitle = giftTitle || text;
+    state.data.priceLabel = priceLabel || '';
+    state.step = 'rev_comment';
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: 'Теперь отправь текст отзыва:',
+      reply_markup: cancelKb
+    });
+    return true;
+  }
+
+  if (state.step === 'rev_comment') {
+    if (!text) return true;
+    const list = readReviews();
+    const author = msg.from?.username
+      ? `@${msg.from.username}`
+      : (msg.from?.first_name || 'Покупатель');
+
+    list.unshift({
+      id: `rev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      author,
+      rating: 5,
+      giftTitle: state.data.giftTitle || '',
+      priceLabel: state.data.priceLabel || '',
+      comment: text.slice(0, 1200),
+      reply: '',
+      replyBy: '',
+      createdAt: new Date().toISOString().slice(0, 10)
+    });
+
+    await writeReviews(list, 'Add review from TG bot');
+    tgWizard.delete(chatId);
+
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: '<b>Спасибо! Отзыв опубликован и уже доступен в боте и на сайте.</b>',
+      parse_mode: 'HTML',
+      reply_markup: getMainMenuKeyboard(chatId)
+    });
+    return true;
+  }
+
+  if (state.step === 'rev_reply_text') {
+    if (!text) return true;
+    const list = readReviews();
+    const idx = list.findIndex(r => r.id === state.data.reviewId);
+    tgWizard.delete(chatId);
+
+    if (idx === -1) {
+      await tgApi('sendMessage', { chat_id: chatId, text: 'Отзыв не найден.', reply_markup: getAdminPanelKeyboard() });
+      return true;
+    }
+
+    list[idx].reply = text.slice(0, 1000);
+    list[idx].replyBy = msg.from?.username ? `@${msg.from.username}` : 'Админ';
+    await writeReviews(list, `Reply review ${state.data.reviewId} from TG bot`);
+
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: '<b>Ответ сохранён и добавлен к отзыву!</b>',
+      parse_mode: 'HTML',
+      reply_markup: getMainMenuKeyboard(chatId)
+    });
+    return true;
+  }
 
   if (state.step === 'password') {
     if (text === ADMIN_PASSWORD) {
@@ -1467,7 +1706,6 @@ app.post('/telegram/webhook', async (req, res) => {
 
   const update = req.body || {};
 
-  // Обработка инлайн-запросов (@giftmarket_by_bot ... в любом чате)
   if (update.inline_query) {
     await handleInlineQuery(update.inline_query);
     return;
@@ -1483,6 +1721,12 @@ app.post('/telegram/webhook', async (req, res) => {
     if (text.startsWith('/start') || text.startsWith('/menu')) {
       tgWizard.delete(chatId);
       await sendMainMenu(chatId);
+      return;
+    }
+
+    if (text.startsWith('/reviews')) {
+      tgWizard.delete(chatId);
+      await sendReviewCard(chatId, 0);
       return;
     }
 
@@ -1530,6 +1774,86 @@ app.post('/telegram/webhook', async (req, res) => {
       : `<a href="tg://user?id=${fromUser.id}">${fromUser.first_name || 'Покупатель'}</a>`;
 
     trackBotUser(chatId, fromUser.username);
+
+    if (data === 'noop') {
+      await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
+      return;
+    }
+
+    if (data === 'rev_write') {
+      await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
+      const gifts = readGifts();
+      const rows = gifts.slice(0, 5).map(g => ([
+        { text: `${g.name} ${g.number} (${g.prices.TON} TON)`, callback_data: `rev_pick_${g.id}` }
+      ]));
+      rows.push([{ text: 'Ввести подарок и цену вручную', callback_data: 'rev_pick_custom' }]);
+      rows.push([{ text: 'Назад к отзывам', callback_data: 'rev_0' }]);
+
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: '<b>Оставить отзыв</b>\n\nВыбери подарок из списка или укажи свой:',
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: rows }
+      });
+      return;
+    }
+
+    if (data.startsWith('rev_pick_')) {
+      await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
+      const picked = data.replace('rev_pick_', '');
+      const cancelKb = { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] };
+
+      if (picked === 'custom') {
+        tgWizard.set(chatId, { step: 'rev_custom_meta', data: {} });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: 'Напиши подарок и цену через знак <code>|</code>, например:\n<code>Pool Float #110 493 | 8 TON</code>',
+          parse_mode: 'HTML',
+          reply_markup: cancelKb
+        });
+        return;
+      }
+
+      const g = readGifts().find(item => item.id === picked);
+      tgWizard.set(chatId, {
+        step: 'rev_comment',
+        data: {
+          giftTitle: g ? `${g.name} ${g.number}` : 'Подарок',
+          priceLabel: g ? `${g.prices.TON} TON` : ''
+        }
+      });
+
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: `Покупка: <b>${g ? `${g.name} ${g.number} · ${g.prices.TON} TON` : 'Подарок'}</b>\n\nТеперь отправь текст отзыва:`,
+        parse_mode: 'HTML',
+        reply_markup: cancelKb
+      });
+      return;
+    }
+
+    if (data.startsWith('rev_reply_')) {
+      await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
+      if (!isBotAdmin(chatId)) {
+        await tgApi('sendMessage', { chat_id: chatId, text: 'Только для администраторов.' });
+        return;
+      }
+      const reviewId = data.replace('rev_reply_', '');
+      tgWizard.set(chatId, { step: 'rev_reply_text', data: { reviewId } });
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Напиши текст ответа на этот отзыв:',
+        reply_markup: { inline_keyboard: [[{ text: 'Отменить', callback_data: 'adm_cancel' }]] }
+      });
+      return;
+    }
+
+    if (data.startsWith('rev_')) {
+      await tgApi('answerCallbackQuery', { callback_query_id: cb.id });
+      const idx = Number(data.replace('rev_', '')) || 0;
+      await sendReviewCard(chatId, idx, msgId);
+      return;
+    }
 
     if (data === 'toggle_sub') {
       const state = readBotState();
@@ -1760,7 +2084,7 @@ async function setupWebhookWithRetry(attempt = 1) {
 
 (async () => {
   const remoteGifts = await githubFetchJson('data/gifts.json');
-  if (Array.isArray(remoteGifts) && remoteGifts.length > 0) {
+  if (Array.isArray(remoteGifts)) {
     fs.writeFileSync(GIFTS_FILE, JSON.stringify(remoteGifts, null, 2), 'utf8');
   } else {
     readGifts();
@@ -1773,6 +2097,13 @@ async function setupWebhookWithRetry(attempt = 1) {
     st.adminIds.forEach(id => tgAdminAuth.add(id));
   } else {
     readBotState();
+  }
+
+  const remoteReviews = await githubFetchJson('data/reviews.json');
+  if (Array.isArray(remoteReviews)) {
+    fs.writeFileSync(REVIEWS_FILE, JSON.stringify(remoteReviews, null, 2), 'utf8');
+  } else {
+    readReviews();
   }
 
   app.listen(PORT, () => {
