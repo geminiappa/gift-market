@@ -1,1 +1,35 @@
-[]
+[
+  {
+    "id": "oblina",
+    "name": "Candy Cane",
+    "number": "#117 444",
+    "model": "Oblina",
+    "file": "uploads/1795775600000_9wxt1c.mp4",
+    "video": "uploads/1795775600000_9wxt1c.mp4",
+    "previewIsVideo": true,
+    "sku": "#117 444",
+    "prices": {
+      "TON": 7,
+      "BYN": 22,
+      "STARS": 460
+    },
+    "subtitle": "Коллекционный подарок · модель Oblina",
+    "description": "Candy Cane #117 444 — коллекционный подарок в модели Oblina.",
+    "glow": "#414448",
+    "reserved": false,
+    "traits": {
+      "model": {
+        "name": "Oblina",
+        "chance": "1%"
+      },
+      "pattern": {
+        "name": "Rudolph",
+        "chance": "2"
+      },
+      "backdrop": {
+        "name": "Camo Green",
+        "chance": "1%"
+      }
+    }
+  }
+]
